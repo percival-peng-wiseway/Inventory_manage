@@ -308,6 +308,7 @@ export default function Home() {
                   <option value="all">{tr("全部类别", "All categories")}</option>
                   <option value="电池">{tr("电池", "Battery")}</option>
                   <option value="太阳能板">{tr("太阳能板", "Solar panel")}</option>
+                  <option value="逆变器">{tr("逆变器", "Inverter")}</option>
                   <option value="安装配件">{tr("安装配件", "Installation accessories")}</option>
                   <option value="其他">{tr("其他", "Other")}</option>
                 </select>
@@ -479,6 +480,7 @@ export default function Home() {
                       >
                         <option value="电池">{tr("电池", "Battery")}</option>
                         <option value="太阳能板">{tr("太阳能板", "Solar panel")}</option>
+                        <option value="逆变器">{tr("逆变器", "Inverter")}</option>
                         <option value="安装配件">{tr("安装配件", "Installation accessories")}</option>
                         <option value="其他">{tr("其他", "Other")}</option>
                       </select>
@@ -620,6 +622,7 @@ function translateCategory(category: string, lang: Language) {
   const categories: Record<string, string> = {
     "电池": "Battery",
     "太阳能板": "Solar panel",
+    "逆变器": "Inverter",
     "安装配件": "Installation accessories",
     "其他": "Other",
   };
@@ -630,6 +633,7 @@ function categoryClass(category: string) {
   const classes: Record<string, string> = {
     "电池": "category-battery",
     "太阳能板": "category-solar",
+    "逆变器": "category-inverter",
     "安装配件": "category-accessory",
     "其他": "category-other",
   };

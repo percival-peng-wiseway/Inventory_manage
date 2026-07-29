@@ -285,7 +285,7 @@ export async function POST(request: Request) {
     const items = Array.isArray(body.items) ? body.items as Array<{ sku: string; quantity: number; category: string }> : [];
     if (!items.length) return error("没有可入库的项目");
     for (const item of items) {
-      if (!item.sku || !Number.isInteger(item.quantity) || item.quantity < 1 || !["电池", "太阳能板", "安装配件", "其他"].includes(item.category)) return error("入库内容有误");
+      if (!item.sku || !Number.isInteger(item.quantity) || item.quantity < 1 || !["电池", "太阳能板", "逆变器", "安装配件", "其他"].includes(item.category)) return error("入库内容有误");
     }
     await database.batch([
       ...items.map((item) =>
