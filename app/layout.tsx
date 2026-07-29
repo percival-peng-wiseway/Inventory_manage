@@ -6,7 +6,7 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "简仓",
+  title: "E3 energy Inventory",
   description: "库存与送货管理",
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
 };
