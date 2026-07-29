@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 type InventoryItem = {
   sku: string;
   category: string;
+  status: string;
   on_hand: number;
   pending: number;
   available: number;
@@ -119,12 +120,7 @@ export default function Home() {
     return data.inventory
       .filter((item) => !keyword || item.sku.toLowerCase().includes(keyword))
       .filter((item) => categoryFilter === "all" || item.category === categoryFilter)
-      .filter((item) => {
-        if (stockFilter === "low") return item.available <= 5;
-        if (stockFilter === "normal") return item.available > 5;
-        if (stockFilter === "pending") return item.pending > 0;
-        return true;
-      })
+      .filter((item) => stockFilter === "all" || item.status === stockFilter)
       .sort((a, b) => {
         if (sortBy === "available-asc") return a.available - b.available;
         if (sortBy === "available-desc") return b.available - a.available;
@@ -182,10 +178,10 @@ export default function Home() {
     }
   };
 
-  const changeCategory = async (sku: string, category: string) => {
+  const changeStatus = async (sku: string, status: string) => {
     try {
-      await mutate({ action: "setCategory", sku, category });
-      notify(tr("库存类别已更新", "Category updated"));
+      await mutate({ action: "setStatus", sku, status });
+      notify(tr("库存状态已更新", "Status updated"));
     } catch (error) {
       notify(error instanceof Error ? error.message : tr("更新失败", "Update failed"));
     }
@@ -217,7 +213,7 @@ export default function Home() {
         sku,
         quantity: (current?.quantity || 0) + quantity,
         isNew: !existingItem,
-        category: current?.category || existingItem?.category || "正常库存",
+        category: current?.category || existingItem?.category || "其他",
       });
     }
 
@@ -302,14 +298,16 @@ export default function Home() {
                 />
                 <select aria-label={tr("类别", "Category")} value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
                   <option value="all">{tr("全部类别", "All categories")}</option>
-                  <option value="正常库存">{tr("正常库存", "Regular")}</option>
-                  <option value="积存库存">{tr("积存库存", "Aged stock")}</option>
+                  <option value="电池">{tr("电池", "Battery")}</option>
+                  <option value="太阳能板">{tr("太阳能板", "Solar panel")}</option>
+                  <option value="安装配件">{tr("安装配件", "Installation accessories")}</option>
+                  <option value="其他">{tr("其他", "Other")}</option>
                 </select>
                 <select aria-label={tr("库存状态", "Stock status")} value={stockFilter} onChange={(event) => setStockFilter(event.target.value)}>
                   <option value="all">{tr("全部状态", "All status")}</option>
-                  <option value="normal">{tr("正常", "In stock")}</option>
-                  <option value="low">{tr("低库存", "Low stock")}</option>
-                  <option value="pending">Pending</option>
+                  <option value="充足">{tr("充足", "Sufficient")}</option>
+                  <option value="积压">{tr("积压", "Overstock")}</option>
+                  <option value="低库存">{tr("低库存", "Low stock")}</option>
                 </select>
                 <select aria-label={tr("排序", "Sort")} value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
                   <option value="sku">{tr("型号排序", "Sort by SKU")}</option>
@@ -325,22 +323,23 @@ export default function Home() {
                     {filteredInventory.map((item) => (
                       <tr key={item.sku}>
                         <td><b>{item.sku}</b></td>
-                        <td>
-                          <select
-                            className="inline-select"
-                            aria-label={`${item.sku} ${tr("类别", "category")}`}
-                            value={item.category}
-                            disabled={busy}
-                            onChange={(event) => changeCategory(item.sku, event.target.value)}
-                          >
-                            <option value="正常库存">{tr("正常库存", "Regular")}</option>
-                            <option value="积存库存">{tr("积存库存", "Aged stock")}</option>
-                          </select>
-                        </td>
+                        <td>{translateCategory(item.category, lang)}</td>
                         <td>{item.on_hand}</td>
                         <td className="pending-number">{item.pending}</td>
                         <td><b>{item.available}</b></td>
-                        <td><span className={`stock-status ${item.available <= 5 ? "low" : ""}`}>{item.available <= 5 ? tr("低库存", "Low") : tr("正常", "OK")}</span></td>
+                        <td>
+                          <select
+                            className={`status-select ${statusClass(item.status)}`}
+                            aria-label={`${item.sku} ${tr("状态", "status")}`}
+                            value={item.status}
+                            disabled={busy}
+                            onChange={(event) => changeStatus(item.sku, event.target.value)}
+                          >
+                            <option value="充足">{tr("充足", "Sufficient")}</option>
+                            <option value="积压">{tr("积压", "Overstock")}</option>
+                            <option value="低库存">{tr("低库存", "Low stock")}</option>
+                          </select>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -426,8 +425,10 @@ export default function Home() {
                         value={item.category}
                         onChange={(event) => setArrivalDraft((current) => current.map((row) => row.sku === item.sku ? { ...row, category: event.target.value } : row))}
                       >
-                        <option value="正常库存">{tr("正常库存", "Regular")}</option>
-                        <option value="积存库存">{tr("积存库存", "Aged stock")}</option>
+                        <option value="电池">{tr("电池", "Battery")}</option>
+                        <option value="太阳能板">{tr("太阳能板", "Solar panel")}</option>
+                        <option value="安装配件">{tr("安装配件", "Installation accessories")}</option>
+                        <option value="其他">{tr("其他", "Other")}</option>
                       </select>
                       <span>＋{item.quantity}</span>
                     </div>
@@ -524,6 +525,7 @@ function translateLog(value: string, lang: Language) {
     "新货入库": "Stock received",
     "初始化库存": "Inventory initialised",
     "更改类别": "Category changed",
+    "更改状态": "Status changed",
     "删除订单": "Order deleted",
   };
   return translations[value] || value;
@@ -536,8 +538,26 @@ function logActionClass(action: string) {
     "新货入库": "log-arrival",
     "确认送达": "log-delivered",
     "更改类别": "log-category",
+    "更改状态": "log-category",
     "删除订单": "log-deleted",
     "初始化库存": "log-initial",
   };
   return classes[action] || "log-default";
+}
+
+function translateCategory(category: string, lang: Language) {
+  if (lang === "zh") return category;
+  const categories: Record<string, string> = {
+    "电池": "Battery",
+    "太阳能板": "Solar panel",
+    "安装配件": "Installation accessories",
+    "其他": "Other",
+  };
+  return categories[category] || category;
+}
+
+function statusClass(status: string) {
+  if (status === "积压") return "status-overstock";
+  if (status === "低库存") return "status-low";
+  return "status-sufficient";
 }

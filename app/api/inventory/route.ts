@@ -1,17 +1,17 @@
 import { env } from "cloudflare:workers";
 
 const seedItems = [
-  ["KH10", "正常库存", 11],
-  ["KH8", "正常库存", 17],
-  ["H3 10.0", "正常库存", 7],
-  ["H3 125", "正常库存", 1],
-  ["H1 5.0", "正常库存", 5],
-  ["H3 15.0", "正常库存", 4],
-  ["CQ7 S", "正常库存", 190],
-  ["CQ7 M", "正常库存", 35],
-  ["CQ7 M V6+", "正常库存", 7],
-  ["EQ4800 S", "积存库存", 3],
-  ["JAM 440", "积存库存", 8],
+  ["KH10", "电池", 11, "充足"],
+  ["KH8", "电池", 17, "充足"],
+  ["H3 10.0", "电池", 7, "充足"],
+  ["H3 125", "电池", 1, "低库存"],
+  ["H1 5.0", "电池", 5, "低库存"],
+  ["H3 15.0", "电池", 4, "低库存"],
+  ["CQ7 S", "电池", 190, "充足"],
+  ["CQ7 M", "电池", 35, "充足"],
+  ["CQ7 M V6+", "电池", 7, "充足"],
+  ["EQ4800 S", "电池", 3, "积压"],
+  ["JAM 440", "电池", 8, "积压"],
 ] as const;
 
 type RuntimeEnv = { DB: D1Database };
@@ -38,6 +38,7 @@ async function initializeDatabase() {
     database.prepare(`CREATE TABLE IF NOT EXISTS inventory (
       sku TEXT PRIMARY KEY,
       category TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT '充足',
       on_hand INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
@@ -71,12 +72,28 @@ async function initializeDatabase() {
     )`),
   ]);
 
+  const inventoryColumns = await database.prepare("PRAGMA table_info(inventory)").all<{ name: string }>();
+  if (!inventoryColumns.results.some((column) => column.name === "status")) {
+    await database.prepare("ALTER TABLE inventory ADD COLUMN status TEXT NOT NULL DEFAULT '充足'").run();
+  }
+  await database.prepare(`
+    UPDATE inventory
+    SET
+      status = CASE
+        WHEN category = '积存库存' THEN '积压'
+        WHEN on_hand <= 5 THEN '低库存'
+        ELSE '充足'
+      END,
+      category = '电池'
+    WHERE category IN ('正常库存', '积存库存')
+  `).run();
+
   const count = await database.prepare("SELECT COUNT(*) AS count FROM inventory").first<{ count: number }>();
   if (!count?.count) {
     await database.batch(
       [
-        ...seedItems.map(([sku, category, quantity]) =>
-          database.prepare("INSERT INTO inventory (sku, category, on_hand) VALUES (?, ?, ?)").bind(sku, category, quantity),
+        ...seedItems.map(([sku, category, quantity, status]) =>
+          database.prepare("INSERT INTO inventory (sku, category, on_hand, status) VALUES (?, ?, ?, ?)").bind(sku, category, quantity, status),
         ),
         database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
           .bind("系统", "初始化库存", `共 ${seedItems.length} 个型号，合计 288`),
@@ -93,13 +110,14 @@ export async function GET() {
       SELECT
         i.sku,
         i.category,
+        i.status,
         i.on_hand,
         COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS pending,
         i.on_hand - COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS available
       FROM inventory i
       LEFT JOIN orders o ON i.sku = o.sku
-      GROUP BY i.sku, i.category, i.on_hand
-      ORDER BY CASE i.category WHEN '正常库存' THEN 0 ELSE 1 END, i.rowid
+      GROUP BY i.sku, i.category, i.status, i.on_hand
+      ORDER BY i.rowid
     `).all(),
     database.prepare("SELECT * FROM orders ORDER BY id DESC LIMIT 200").all(),
     database.prepare("SELECT * FROM operations ORDER BY id DESC LIMIT 300").all(),
@@ -134,16 +152,16 @@ export async function POST(request: Request) {
     return Response.json({ ok: true });
   }
 
-  if (body.action === "setCategory") {
+  if (body.action === "setStatus") {
     const sku = String(body.sku || "").trim();
-    const category = String(body.category || "");
-    if (!["正常库存", "积存库存"].includes(category)) return error("库存类别无效");
+    const status = String(body.status || "");
+    if (!["充足", "积压", "低库存"].includes(status)) return error("库存状态无效");
     const item = await database.prepare("SELECT sku FROM inventory WHERE sku = ?").bind(sku).first();
     if (!item) return error("找不到这个型号", 404);
     await database.batch([
-      database.prepare("UPDATE inventory SET category = ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ?").bind(category, sku),
+      database.prepare("UPDATE inventory SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ?").bind(status, sku),
       database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
-        .bind("采购", "更改类别", `${sku} → ${category}`),
+        .bind("采购", "更改状态", `${sku} → ${status}`),
     ]);
     return Response.json({ ok: true });
   }
@@ -208,7 +226,7 @@ export async function POST(request: Request) {
     const items = Array.isArray(body.items) ? body.items as Array<{ sku: string; quantity: number; category: string }> : [];
     if (!items.length) return error("没有可入库的项目");
     for (const item of items) {
-      if (!item.sku || !Number.isInteger(item.quantity) || item.quantity < 1 || !["正常库存", "积存库存"].includes(item.category)) return error("入库内容有误");
+      if (!item.sku || !Number.isInteger(item.quantity) || item.quantity < 1 || !["电池", "太阳能板", "安装配件", "其他"].includes(item.category)) return error("入库内容有误");
     }
     await database.batch([
       ...items.map((item) =>

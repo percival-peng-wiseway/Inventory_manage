@@ -109,7 +109,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
 .confirm-title span { color: #a55d0a; background: #fff0d4; border-radius: 99px; padding: 5px 9px; font-size: 11px; font-weight: 800; }
 .arrival-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 12px; padding: 12px 2px; border-bottom: 1px solid var(--line); }
 .arrival-row span { color: var(--forest-2); font-weight: 800; }
-.inline-select, .arrival-category { width: auto; min-width: 112px; padding: 6px 8px; border-radius: 7px; font-size: 11px; }
+.arrival-category, .status-select { width: auto; min-width: 112px; padding: 6px 8px; border-radius: 7px; font-size: 11px; font-weight: 700; }
+.status-sufficient { background: #dff0e4; border-color: #bad8c4; color: #276342; }
+.status-overstock { background: #dfeafb; border-color: #bed0ea; color: #315f9c; }
+.status-low { background: #fff0d4; border-color: #ead1a5; color: #9a5a09; }
 .new-sku-badge { display: inline-block; margin-left: 8px; padding: 3px 7px; border-radius: 99px; background: #fff0d4; color: #a55d0a; font-size: 10px; font-style: normal; font-weight: 800; vertical-align: 1px; }
 .confirm-box button { margin-top: 20px; }
 

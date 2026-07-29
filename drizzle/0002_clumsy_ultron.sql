@@ -1,0 +1,1 @@
+ALTER TABLE `inventory` ADD `status` text DEFAULT '充足' NOT NULL;
