@@ -15,6 +15,17 @@ const seedItems = [
 ] as const;
 
 type RuntimeEnv = { DB: D1Database };
+type OrderActionRow = {
+  id: number;
+  customer: string;
+  phone: string | null;
+  sku: string;
+  quantity: number;
+  note: string | null;
+  address: string | null;
+  planned_date: string | null;
+  driver: string | null;
+};
 
 function db() {
   return (env as unknown as RuntimeEnv).DB;
@@ -44,6 +55,7 @@ async function initializeDatabase() {
     )`),
     database.prepare(`CREATE TABLE IF NOT EXISTS orders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_group TEXT,
       sales_rep TEXT NOT NULL,
       customer TEXT NOT NULL,
       phone TEXT,
@@ -75,6 +87,10 @@ async function initializeDatabase() {
   const inventoryColumns = await database.prepare("PRAGMA table_info(inventory)").all<{ name: string }>();
   if (!inventoryColumns.results.some((column) => column.name === "status")) {
     await database.prepare("ALTER TABLE inventory ADD COLUMN status TEXT NOT NULL DEFAULT '充足'").run();
+  }
+  const orderColumns = await database.prepare("PRAGMA table_info(orders)").all<{ name: string }>();
+  if (!orderColumns.results.some((column) => column.name === "order_group")) {
+    await database.prepare("ALTER TABLE orders ADD COLUMN order_group TEXT").run();
   }
   await database.prepare(`
     UPDATE inventory
@@ -156,12 +172,13 @@ export async function POST(request: Request) {
 
     const salesRep = String(body.salesRep || "");
     const customer = String(body.customer || "");
+    const orderGroup = crypto.randomUUID();
     await database.batch([
       ...items.map((item) =>
         database.prepare(`
-          INSERT INTO orders (sales_rep, customer, phone, sku, quantity, note)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `).bind(salesRep, customer, String(body.phone || ""), item.sku, item.quantity, String(body.note || "")),
+          INSERT INTO orders (order_group, sales_rep, customer, phone, sku, quantity, note)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).bind(orderGroup, salesRep, customer, String(body.phone || ""), item.sku, item.quantity, String(body.note || "")),
       ),
       database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
         .bind(salesRep, "销售预留", `${customer} · ${items.map((item) => `${item.sku} × ${item.quantity}`).join("，")}`),
@@ -184,57 +201,82 @@ export async function POST(request: Request) {
   }
 
   if (body.action === "cancelOrder") {
-    const orderId = Number(body.orderId);
-    const order = await database.prepare("SELECT customer, sku, quantity FROM orders WHERE id = ? AND status = 'pending'")
-      .bind(orderId).first<{ customer: string; sku: string; quantity: number }>();
-    if (!order) return error("这个订单已经处理或不存在");
+    const orderIds = readOrderIds(body);
+    if (!orderIds.length) return error("找不到这个订单");
+    const placeholders = orderIds.map(() => "?").join(",");
+    const orderRows = await database.prepare(`SELECT * FROM orders WHERE id IN (${placeholders}) AND status = 'pending' ORDER BY id`)
+      .bind(...orderIds).all<OrderActionRow>();
+    if (orderRows.results.length !== orderIds.length) return error("这个订单已经处理或不存在");
+    const firstOrder = orderRows.results[0];
+    const itemText = orderRows.results.map((order) => `${order.sku} × ${order.quantity}`).join("，");
     await database.batch([
-      database.prepare("UPDATE orders SET status = 'cancelled' WHERE id = ? AND status = 'pending'").bind(orderId),
+      ...orderIds.map((orderId) =>
+        database.prepare("UPDATE orders SET status = 'cancelled' WHERE id = ? AND status = 'pending'").bind(orderId),
+      ),
       database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
-        .bind("采购", "删除订单", `${order.customer} · ${order.sku} × ${order.quantity}`),
+        .bind("采购", "删除订单", `${firstOrder.customer} · ${itemText}`),
     ]);
     return Response.json({ ok: true });
   }
 
   if (body.action === "schedule") {
-    const orderId = Number(body.orderId);
-    await database.prepare(`
-      UPDATE orders SET status = 'scheduled', address = ?, planned_date = ?, driver = ? WHERE id = ? AND status = 'pending'
-    `).bind(String(body.address || ""), String(body.plannedDate || ""), String(body.driver || "司机"), orderId).run();
-    const order = await database.prepare("SELECT * FROM orders WHERE id = ?").bind(orderId).first<Record<string, unknown>>();
-    if (!order) return error("找不到这个销售单", 404);
-    await database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
-      .bind("采购", "安排送货", `${order.customer} · ${order.sku} × ${order.quantity} · ${order.planned_date}`).run();
+    const orderIds = readOrderIds(body);
+    if (!orderIds.length) return error("找不到这个销售单", 404);
+    const placeholders = orderIds.map(() => "?").join(",");
+    const orderRows = await database.prepare(`SELECT * FROM orders WHERE id IN (${placeholders}) AND status = 'pending' ORDER BY id`)
+      .bind(...orderIds).all<OrderActionRow>();
+    if (orderRows.results.length !== orderIds.length) return error("这个销售单已经处理或不存在");
+    const firstOrder = orderRows.results[0];
+    const address = String(body.address || "");
+    const plannedDate = String(body.plannedDate || "");
+    const driver = String(body.driver || "司机");
+    const itemText = orderRows.results.map((order) => `${order.sku} × ${order.quantity}`).join("，");
+    await database.batch([
+      ...orderIds.map((orderId) =>
+        database.prepare(`
+          UPDATE orders SET status = 'scheduled', address = ?, planned_date = ?, driver = ? WHERE id = ? AND status = 'pending'
+        `).bind(address, plannedDate, driver, orderId),
+      ),
+      database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
+        .bind("采购", "安排送货", `${firstOrder.customer} · ${itemText} · ${plannedDate}`),
+    ]);
     const message = body.language === "en"
       ? [
-        `Contact: ${order.customer}`,
-        `Phone: ${order.phone || "Not provided"}`,
-        `Items: ${order.sku} × ${order.quantity}`,
-        `Note: ${order.note || "-"}`,
-        `Address: ${order.address}`,
+        `Contact: ${firstOrder.customer}`,
+        `Phone: ${firstOrder.phone || "Not provided"}`,
+        `Items: ${orderRows.results.map((order) => `${order.sku} × ${order.quantity}`).join(", ")}`,
+        `Note: ${firstOrder.note || "-"}`,
+        `Address: ${address}`,
       ].join("\n")
       : [
-        `联系人：${order.customer}`,
-        `电话：${order.phone || "未提供"}`,
-        `货物：${order.sku} × ${order.quantity}`,
-        `备注：${order.note || "-"}`,
-        `地址：${order.address}`,
+        `联系人：${firstOrder.customer}`,
+        `电话：${firstOrder.phone || "未提供"}`,
+        `货物：${itemText}`,
+        `备注：${firstOrder.note || "-"}`,
+        `地址：${address}`,
       ].join("\n");
     return Response.json({ ok: true, message });
   }
 
   if (body.action === "deliver") {
-    const orderId = Number(body.orderId);
-    const order = await database.prepare("SELECT * FROM orders WHERE id = ? AND status = 'scheduled'")
-      .bind(orderId).first<{ sku: string; quantity: number; customer: string; driver: string | null }>();
-    if (!order) return error("这个任务已经处理或不存在");
+    const orderIds = readOrderIds(body);
+    if (!orderIds.length) return error("找不到这个任务");
+    const placeholders = orderIds.map(() => "?").join(",");
+    const orderRows = await database.prepare(`SELECT * FROM orders WHERE id IN (${placeholders}) AND status = 'scheduled' ORDER BY id`)
+      .bind(...orderIds).all<OrderActionRow>();
+    if (orderRows.results.length !== orderIds.length) return error("这个任务已经处理或不存在");
+    const firstOrder = orderRows.results[0];
+    const itemText = orderRows.results.map((order) => `${order.sku} × ${order.quantity}`).join("，");
     await database.batch([
-      database.prepare("UPDATE inventory SET on_hand = on_hand - ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ? AND on_hand >= ?")
-        .bind(order.quantity, order.sku, order.quantity),
-      database.prepare("UPDATE orders SET status = 'delivered', delivered_at = CURRENT_TIMESTAMP WHERE id = ?")
-        .bind(orderId),
+      ...orderRows.results.map((order) =>
+        database.prepare("UPDATE inventory SET on_hand = on_hand - ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ? AND on_hand >= ?")
+          .bind(order.quantity, order.sku, order.quantity),
+      ),
+      ...orderIds.map((orderId) =>
+        database.prepare("UPDATE orders SET status = 'delivered', delivered_at = CURRENT_TIMESTAMP WHERE id = ?").bind(orderId),
+      ),
       database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
-        .bind(order.driver || "司机", "确认送达", `${order.customer} · ${order.sku} × ${order.quantity}`),
+        .bind(firstOrder.driver || "司机", "确认送达", `${firstOrder.customer} · ${itemText}`),
     ]);
     return Response.json({ ok: true });
   }
@@ -269,4 +311,9 @@ export async function POST(request: Request) {
 
 function error(message: string, status = 400) {
   return Response.json({ error: message }, { status });
+}
+
+function readOrderIds(body: Record<string, unknown>) {
+  const rawIds = Array.isArray(body.orderIds) ? body.orderIds : [body.orderId];
+  return [...new Set(rawIds.map(Number).filter((id) => Number.isInteger(id) && id > 0))];
 }

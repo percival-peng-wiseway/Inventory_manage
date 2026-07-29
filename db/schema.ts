@@ -11,6 +11,7 @@ export const inventory = sqliteTable("inventory", {
 
 export const orders = sqliteTable("orders", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  orderGroup: text("order_group"),
   salesRep: text("sales_rep").notNull(),
   customer: text("customer").notNull(),
   phone: text("phone"),

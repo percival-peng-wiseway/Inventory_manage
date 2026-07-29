@@ -13,6 +13,7 @@ type InventoryItem = {
 
 type Order = {
   id: number;
+  order_group: string | null;
   sales_rep: string;
   customer: string;
   phone: string;
@@ -26,6 +27,7 @@ type Order = {
   delivered_at: string | null;
   note: string | null;
 };
+type OrderGroup = { key: string; orders: Order[]; primary: Order };
 
 type ParsedArrival = { sku: string; quantity: number; isNew: boolean; category: string };
 type SaleItem = { sku: string; quantity: number };
@@ -115,8 +117,8 @@ export default function Home() {
     [data.inventory],
   );
 
-  const waitingOrders = data.orders.filter((order) => order.status === "pending");
-  const driverOrders = data.orders.filter((order) => order.status === "scheduled");
+  const waitingGroups = groupOrderRows(data.orders.filter((order) => order.status === "pending"));
+  const driverGroups = groupOrderRows(data.orders.filter((order) => order.status === "scheduled"));
   const filteredInventory = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     return data.inventory
@@ -155,13 +157,13 @@ export default function Home() {
     }
   };
 
-  const handleSchedule = async (event: FormEvent<HTMLFormElement>, order: Order) => {
+  const handleSchedule = async (event: FormEvent<HTMLFormElement>, group: OrderGroup) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     try {
       const result = await mutate({
         action: "schedule",
-        orderId: order.id,
+        orderIds: group.orders.map((order) => order.id),
         address: form.get("address"),
         plannedDate: form.get("plannedDate"),
         driver: form.get("driver"),
@@ -174,10 +176,10 @@ export default function Home() {
     }
   };
 
-  const cancelOrder = async (order: Order) => {
-    if (!window.confirm(tr(`确定删除 ${order.customer} 的订单？`, `Delete ${order.customer}'s order?`))) return;
+  const cancelOrder = async (group: OrderGroup) => {
+    if (!window.confirm(tr(`确定删除 ${group.primary.customer} 的订单？`, `Delete ${group.primary.customer}'s order?`))) return;
     try {
-      await mutate({ action: "cancelOrder", orderId: order.id });
+      await mutate({ action: "cancelOrder", orderIds: group.orders.map((order) => order.id) });
       notify(tr("订单已删除，Pending 库存已释放", "Order deleted and reserved stock released"));
     } catch (error) {
       notify(error instanceof Error ? error.message : tr("删除失败", "Delete failed"));
@@ -270,9 +272,9 @@ export default function Home() {
         {([
           ["overview", tr("库存", "Inventory"), ""],
           ["sale", tr("销售下单", "New order"), ""],
-          ["dispatch", tr("采购调度", "Dispatch"), waitingOrders.length ? String(waitingOrders.length) : ""],
+          ["dispatch", tr("采购调度", "Dispatch"), waitingGroups.length ? String(waitingGroups.length) : ""],
           ["arrival", tr("新货入库", "Receive stock"), ""],
-          ["driver", tr("司机任务", "Driver"), driverOrders.length ? String(driverOrders.length) : ""],
+          ["driver", tr("司机任务", "Driver"), driverGroups.length ? String(driverGroups.length) : ""],
           ["log", tr("操作日志", "Activity log"), ""],
         ] as [View, string, string][]).map(([key, label, count]) => (
           <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}>
@@ -292,7 +294,7 @@ export default function Home() {
               <article><span>{tr("实际在库", "On hand")}</span><strong>{totals.onHand}</strong></article>
               <article className="amber"><span>Pending</span><strong>{totals.pending}</strong></article>
               <article className="green"><span>{tr("可销售", "Available")}</span><strong>{totals.available}</strong></article>
-              <article><span>{tr("待送任务", "Deliveries")}</span><strong>{driverOrders.length}</strong></article>
+              <article><span>{tr("待送任务", "Deliveries")}</span><strong>{driverGroups.length}</strong></article>
             </div>
             <div className="table-card">
               <div className="filter-bar">
@@ -420,22 +422,24 @@ export default function Home() {
             <div className="section-heading">
               <div><h2>{tr("安排送货", "Dispatch")}</h2></div>
             </div>
-            {waitingOrders.length === 0 ? <Empty text={tr("没有待安排订单", "No orders to dispatch")} sub={tr("新订单会显示在这里。", "New orders will appear here.")} /> :
-              <div className="order-list">{waitingOrders.map((order) => (
-                <article className="order-card" key={order.id}>
+            {waitingGroups.length === 0 ? <Empty text={tr("没有待安排订单", "No orders to dispatch")} sub={tr("新订单会显示在这里。", "New orders will appear here.")} /> :
+              <div className="order-list">{waitingGroups.map((group) => (
+                <article className="order-card" key={group.key}>
                   <div className="order-summary">
-                    <span className="order-id">#{String(order.id).padStart(4, "0")}</span>
-                    <h3>{order.customer}</h3>
-                    <p><b>{order.sku}</b> × {order.quantity}</p>
-                    <small>{order.sales_rep === "采购" ? tr("采购", "Purchasing") : order.sales_rep} · {formatDate(order.created_at, lang)}</small>
+                    <span className="order-id">#{String(group.primary.id).padStart(4, "0")}</span>
+                    <h3>{group.primary.customer}</h3>
+                    <div className="order-items-summary">
+                      {group.orders.map((order) => <p key={order.id}><b>{order.sku}</b><span>× {order.quantity}</span></p>)}
+                    </div>
+                    <small>{group.primary.sales_rep} · {formatDate(group.primary.created_at, lang)}</small>
                   </div>
-                  <form className="dispatch-form" onSubmit={(event) => handleSchedule(event, order)}>
+                  <form className="dispatch-form" onSubmit={(event) => handleSchedule(event, group)}>
                     <label>{tr("送货地址", "Address")}<input name="address" placeholder={tr("完整地址", "Full address")} required /></label>
                     <label>{tr("送货日期", "Delivery date")}<input name="plannedDate" type="date" required /></label>
                     <label>{tr("司机", "Driver")}<select name="driver"><option value="司机">{tr("司机", "Driver")}</option></select></label>
                     <div className="dispatch-actions">
                       <button className="primary" disabled={busy}>{tr("安排并生成消息", "Schedule & create message")}</button>
-                      <button type="button" className="danger" disabled={busy} onClick={() => cancelOrder(order)}>{tr("删除", "Delete")}</button>
+                      <button type="button" className="danger" disabled={busy} onClick={() => cancelOrder(group)}>{tr("删除", "Delete")}</button>
                     </div>
                   </form>
                 </article>
@@ -491,17 +495,19 @@ export default function Home() {
         {view === "driver" && (
           <>
             <div className="section-heading"><div><h2>{tr("司机任务", "Driver tasks")}</h2></div></div>
-            {driverOrders.length === 0 ? <Empty text={tr("没有待送任务", "No deliveries")} sub={tr("新任务会显示在这里。", "New tasks will appear here.")} /> :
-              <div className="driver-grid">{driverOrders.map((order) => (
-                <article className="driver-card" key={order.id}>
-                  <div className="driver-date"><span>{tr("送货日期", "Delivery date")}</span><strong>{order.planned_date || tr("待定", "TBC")}</strong></div>
-                  <h3>{order.customer}</h3>
-                  <p>{order.address}</p>
-                  <div className="product-line"><b>{order.sku}</b><strong>× {order.quantity}</strong></div>
-                  {order.phone && <a href={`tel:${order.phone}`}>{order.phone}</a>}
+            {driverGroups.length === 0 ? <Empty text={tr("没有待送任务", "No deliveries")} sub={tr("新任务会显示在这里。", "New tasks will appear here.")} /> :
+              <div className="driver-grid">{driverGroups.map((group) => (
+                <article className="driver-card" key={group.key}>
+                  <div className="driver-date"><span>{tr("送货日期", "Delivery date")}</span><strong>{group.primary.planned_date || tr("待定", "TBC")}</strong></div>
+                  <h3>{group.primary.customer}</h3>
+                  <p>{group.primary.address}</p>
+                  <div className="product-lines">
+                    {group.orders.map((order) => <div className="product-line" key={order.id}><b>{order.sku}</b><strong>× {order.quantity}</strong></div>)}
+                  </div>
+                  {group.primary.phone && <a href={`tel:${group.primary.phone}`}>{group.primary.phone}</a>}
                   <button className="primary full" disabled={busy} onClick={async () => {
                     try {
-                      await mutate({ action: "deliver", orderId: order.id });
+                      await mutate({ action: "deliver", orderIds: group.orders.map((order) => order.id) });
                       notify(tr("已确认送达，实际库存已扣减", "Delivered and stock updated"));
                     } catch (error) {
                       notify(error instanceof Error ? error.message : "操作失败");
@@ -546,6 +552,22 @@ export default function Home() {
 
 function Empty({ text, sub }: { text: string; sub: string }) {
   return <div className="empty"><span>✓</span><h3>{text}</h3><p>{sub}</p></div>;
+}
+
+function groupOrderRows(orders: Order[]): OrderGroup[] {
+  const groups = new Map<string, Order[]>();
+  for (const order of orders) {
+    const key = order.order_group || [
+      "legacy",
+      order.sales_rep,
+      order.customer,
+      order.phone || "",
+      order.created_at,
+      order.note || "",
+    ].join(":");
+    groups.set(key, [...(groups.get(key) || []), order]);
+  }
+  return [...groups.entries()].map(([key, rows]) => ({ key, orders: rows, primary: rows[0] }));
 }
 
 function formatDate(value: string, lang: Language) {
