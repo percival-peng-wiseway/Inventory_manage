@@ -306,7 +306,7 @@ export default function Home() {
         <div className="brand">
           <span className="brand-mark">仓</span>
           <div>
-            <strong>简仓</strong>
+            <strong>E3 energy Inventory</strong>
             <small>{tr("库存管理", "Inventory")}</small>
           </div>
         </div>
