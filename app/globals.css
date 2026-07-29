@@ -32,6 +32,8 @@ button { cursor: pointer; }
 .topbar-stats b { margin-left: 5px; font-size: 15px; }
 .topbar-actions { display: flex; align-items: center; gap: 10px; }
 .lang-toggle { min-width: 48px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--forest); font-size: 12px; font-weight: 800; }
+.admin-toggle { padding: 8px 11px; border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--muted); font-size: 12px; font-weight: 800; }
+.admin-toggle.active { border-color: #e5bd78; background: #fff0d4; color: #8a530c; }
 
 .eyebrow { margin: 0 0 10px; color: var(--forest-2); font-size: 12px; font-weight: 800; letter-spacing: .15em; text-transform: uppercase; }
 
@@ -113,6 +115,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
 .danger { border: 1px solid #e3bdb7; border-radius: 10px; padding: 13px 18px; background: #fff6f4; color: #a13d32; font-weight: 800; }
 .danger:hover { background: #fce8e4; }
 .danger:disabled { opacity: .45; cursor: not-allowed; }
+.delete-mini { border: 1px solid #e3bdb7; border-radius: 7px; padding: 6px 9px; background: #fff6f4; color: #a13d32; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.delete-mini:hover { background: #fce8e4; }
+.delete-mini:disabled { opacity: .45; cursor: not-allowed; }
 .message-box { margin-top: 22px; display: grid; grid-template-columns: 180px 1fr auto; gap: 20px; align-items: center; background: var(--forest); color: white; border-radius: 16px; padding: 22px; }
 .message-box .eyebrow { color: #a9d2bc; }
 .message-box pre { white-space: pre-wrap; margin: 0; padding: 15px; background: rgba(255,255,255,.08); border-radius: 9px; font: 13px/1.7 var(--font-geist-mono); }
@@ -157,6 +162,11 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
 .log-default { background: var(--mint); color: var(--forest); }
 .empty-row { text-align: center; color: var(--muted); padding: 50px; }
 .toast { position: fixed; right: 24px; bottom: 24px; z-index: 10; padding: 14px 18px; border-radius: 10px; color: white; background: var(--ink); box-shadow: 0 12px 28px rgba(0,0,0,.22); font-weight: 700; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 20px; background: rgba(20,34,27,.48); }
+.admin-modal { width: min(400px, 100%); display: grid; gap: 20px; padding: 26px; border: 1px solid var(--line); border-radius: 16px; background: var(--paper); box-shadow: 0 24px 70px rgba(0,0,0,.2); }
+.admin-modal h3 { font-size: 22px; }
+.admin-modal p { margin: 6px 0 0; color: var(--muted); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
 
 @media (max-width: 900px) {
   .nav-tabs { margin: 18px 0 0; border-radius: 0; grid-template-columns: repeat(6, minmax(120px, 1fr)); overflow-x: auto; }

@@ -38,11 +38,11 @@ type LogEntry = {
   detail: string;
   created_at: string;
 };
-type ApiState = { inventory: InventoryItem[]; orders: Order[]; logs: LogEntry[] };
+type ApiState = { inventory: InventoryItem[]; orders: Order[]; logs: LogEntry[]; admin: boolean };
 type View = "overview" | "sale" | "dispatch" | "arrival" | "driver" | "log";
 type Language = "zh" | "en";
 
-const initialState: ApiState = { inventory: [], orders: [], logs: [] };
+const initialState: ApiState = { inventory: [], orders: [], logs: [], admin: false };
 
 export default function Home() {
   const [data, setData] = useState<ApiState>(initialState);
@@ -60,6 +60,8 @@ export default function Home() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [stockFilter, setStockFilter] = useState("all");
   const [sortBy, setSortBy] = useState("sku");
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("");
   const tr = (zh: string, en: string) => lang === "zh" ? zh : en;
 
   const refresh = async () => {
@@ -195,6 +197,57 @@ export default function Home() {
     }
   };
 
+  const loginAdmin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    try {
+      await mutate({ action: "adminLogin", password: adminPassword });
+      setAdminPassword("");
+      setShowAdminLogin(false);
+      notify(tr("已进入管理员模式", "Admin mode enabled"));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : tr("密码错误", "Incorrect password"));
+    }
+  };
+
+  const logoutAdmin = async () => {
+    try {
+      await mutate({ action: "adminLogout" });
+      notify(tr("已退出管理员模式", "Admin mode disabled"));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : tr("退出失败", "Sign out failed"));
+    }
+  };
+
+  const deleteSku = async (sku: string) => {
+    if (!window.confirm(tr(`确定删除型号 ${sku}？`, `Delete SKU ${sku}?`))) return;
+    try {
+      await mutate({ action: "deleteSku", sku });
+      notify(tr("型号已删除", "SKU deleted"));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : tr("删除失败", "Delete failed"));
+    }
+  };
+
+  const deleteLog = async (logId: number) => {
+    if (!window.confirm(tr("确定删除这条日志？", "Delete this log entry?"))) return;
+    try {
+      await mutate({ action: "deleteLog", logId });
+      notify(tr("日志已删除", "Log deleted"));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : tr("删除失败", "Delete failed"));
+    }
+  };
+
+  const clearLogs = async () => {
+    if (!window.confirm(tr("确定清空全部操作日志？此操作不能撤销。", "Clear all activity logs? This cannot be undone."))) return;
+    try {
+      await mutate({ action: "clearLogs" });
+      notify(tr("操作日志已清空", "Activity log cleared"));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : tr("清空失败", "Clear failed"));
+    }
+  };
+
   const parseArrival = () => {
     const aliases = data.inventory
       .map((item) => item.sku)
@@ -262,6 +315,13 @@ export default function Home() {
             <span>{tr("在库", "Stock")} <b>{loading ? "—" : totals.onHand}</b></span>
             <span>Pending <b>{loading ? "—" : totals.pending}</b></span>
           </div>
+          <button
+            className={`admin-toggle ${data.admin ? "active" : ""}`}
+            onClick={() => data.admin ? logoutAdmin() : setShowAdminLogin(true)}
+            disabled={busy}
+          >
+            {data.admin ? tr("退出管理员", "Exit admin") : tr("管理员", "Admin")}
+          </button>
           <button className="lang-toggle" onClick={() => setLang(lang === "zh" ? "en" : "zh")}>
             {lang === "zh" ? "EN" : "中文"}
           </button>
@@ -327,7 +387,7 @@ export default function Home() {
               <div className="table-title"><h3>{tr("全部型号", "All SKUs")}</h3><span>{filteredInventory.length} SKU</span></div>
               <div className="table-scroll">
                 <table>
-                  <thead><tr><th>{tr("型号", "SKU")}</th><th>{tr("类别", "Category")}</th><th>{tr("实际在库", "On hand")}</th><th>Pending</th><th>{tr("可销售", "Available")}</th><th>{tr("状态", "Status")}</th></tr></thead>
+                  <thead><tr><th>{tr("型号", "SKU")}</th><th>{tr("类别", "Category")}</th><th>{tr("实际在库", "On hand")}</th><th>Pending</th><th>{tr("可销售", "Available")}</th><th>{tr("状态", "Status")}</th>{data.admin && <th>{tr("管理", "Manage")}</th>}</tr></thead>
                   <tbody>
                     {filteredInventory.map((item) => (
                       <tr key={item.sku}>
@@ -349,6 +409,7 @@ export default function Home() {
                             <option value="低库存">{tr("低库存", "Low stock")}</option>
                           </select>
                         </td>
+                        {data.admin && <td><button className="delete-mini" disabled={busy} onClick={() => deleteSku(item.sku)}>{tr("删除", "Delete")}</button></td>}
                       </tr>
                     ))}
                   </tbody>
@@ -523,20 +584,24 @@ export default function Home() {
 
         {view === "log" && (
           <>
-            <div className="section-heading"><div><h2>{tr("操作日志", "Activity log")}</h2></div></div>
+            <div className="section-heading">
+              <div><h2>{tr("操作日志", "Activity log")}</h2></div>
+              {data.admin && data.logs.length > 0 && <button className="danger" disabled={busy} onClick={clearLogs}>{tr("清空全部日志", "Clear all logs")}</button>}
+            </div>
             <div className="table-card">
               <div className="table-scroll">
                 <table>
-                  <thead><tr><th>{tr("时间", "Time")}</th><th>{tr("操作人", "User")}</th><th>{tr("动作", "Action")}</th><th>{tr("内容", "Details")}</th></tr></thead>
+                  <thead><tr><th>{tr("时间", "Time")}</th><th>{tr("操作人", "User")}</th><th>{tr("动作", "Action")}</th><th>{tr("内容", "Details")}</th>{data.admin && <th>{tr("管理", "Manage")}</th>}</tr></thead>
                   <tbody>
                     {data.logs.length === 0 ? (
-                      <tr><td colSpan={4} className="empty-row">{tr("暂无操作记录", "No activity yet")}</td></tr>
+                      <tr><td colSpan={data.admin ? 5 : 4} className="empty-row">{tr("暂无操作记录", "No activity yet")}</td></tr>
                     ) : data.logs.map((entry) => (
                       <tr key={entry.id}>
                         <td className="log-time">{formatDateTime(entry.created_at, lang)}</td>
                         <td><b>{translateLog(entry.actor, lang)}</b></td>
                         <td><span className={`log-action ${logActionClass(entry.action)}`}>{translateLog(entry.action, lang)}</span></td>
                         <td>{entry.detail}</td>
+                        {data.admin && <td><button className="delete-mini" disabled={busy} onClick={() => deleteLog(entry.id)}>{tr("删除", "Delete")}</button></td>}
                       </tr>
                     ))}
                   </tbody>
@@ -547,6 +612,30 @@ export default function Home() {
         )}
       </section>
 
+      {showAdminLogin && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowAdminLogin(false)}>
+          <form className="admin-modal" onSubmit={loginAdmin} onMouseDown={(event) => event.stopPropagation()}>
+            <div>
+              <h3>{tr("管理员模式", "Admin mode")}</h3>
+              <p>{tr("请输入管理员密码", "Enter the administrator password")}</p>
+            </div>
+            <label>{tr("密码", "Password")}
+              <input
+                type="password"
+                inputMode="numeric"
+                autoFocus
+                value={adminPassword}
+                onChange={(event) => setAdminPassword(event.target.value)}
+                required
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="secondary" onClick={() => setShowAdminLogin(false)}>{tr("取消", "Cancel")}</button>
+              <button className="primary" disabled={busy}>{tr("进入", "Enter")}</button>
+            </div>
+          </form>
+        </div>
+      )}
       {toast && <div className="toast" role="status">{toast}</div>}
     </main>
   );

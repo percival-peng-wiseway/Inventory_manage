@@ -1,5 +1,8 @@
 import { env } from "cloudflare:workers";
 
+const ADMIN_PASSWORD = "22224444";
+const ADMIN_COOKIE = "inventory_admin";
+
 type RuntimeEnv = { DB: D1Database };
 type OrderActionRow = {
   id: number;
@@ -92,7 +95,7 @@ async function initializeDatabase() {
 
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   await ensureDatabase();
   const database = db();
   const [inventory, orders, logs] = await Promise.all([
@@ -112,13 +115,65 @@ export async function GET() {
     database.prepare("SELECT * FROM orders ORDER BY id DESC LIMIT 200").all(),
     database.prepare("SELECT * FROM operations ORDER BY id DESC LIMIT 300").all(),
   ]);
-  return Response.json({ inventory: inventory.results, orders: orders.results, logs: logs.results });
+  return Response.json({
+    inventory: inventory.results,
+    orders: orders.results,
+    logs: logs.results,
+    admin: await isAdminRequest(request),
+  });
 }
 
 export async function POST(request: Request) {
   await ensureDatabase();
   const body = await request.json() as Record<string, unknown>;
   const database = db();
+
+  if (body.action === "adminLogin") {
+    if (String(body.password || "") !== ADMIN_PASSWORD) return error("管理员密码错误", 401);
+    return Response.json(
+      { ok: true },
+      { headers: { "Set-Cookie": `${ADMIN_COOKIE}=${await adminToken()}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800` } },
+    );
+  }
+
+  if (body.action === "adminLogout") {
+    return Response.json(
+      { ok: true },
+      { headers: { "Set-Cookie": `${ADMIN_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0` } },
+    );
+  }
+
+  if (body.action === "deleteSku") {
+    if (!await isAdminRequest(request)) return error("需要管理员权限", 403);
+    const sku = String(body.sku || "").trim();
+    if (!sku) return error("型号无效");
+    const activeOrders = await database.prepare(
+      "SELECT COUNT(*) AS count FROM orders WHERE sku = ? AND status IN ('pending', 'scheduled')",
+    ).bind(sku).first<{ count: number }>();
+    if (activeOrders?.count) return error("此型号仍有 Pending 或待送订单，暂时不能删除");
+    const item = await database.prepare("SELECT sku FROM inventory WHERE sku = ?").bind(sku).first();
+    if (!item) return error("找不到这个型号", 404);
+    await database.batch([
+      database.prepare("DELETE FROM inventory WHERE sku = ?").bind(sku),
+      database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
+        .bind("管理员", "删除型号", sku),
+    ]);
+    return Response.json({ ok: true });
+  }
+
+  if (body.action === "deleteLog") {
+    if (!await isAdminRequest(request)) return error("需要管理员权限", 403);
+    const logId = Number(body.logId);
+    if (!Number.isInteger(logId) || logId < 1) return error("日志无效");
+    await database.prepare("DELETE FROM operations WHERE id = ?").bind(logId).run();
+    return Response.json({ ok: true });
+  }
+
+  if (body.action === "clearLogs") {
+    if (!await isAdminRequest(request)) return error("需要管理员权限", 403);
+    await database.prepare("DELETE FROM operations").run();
+    return Response.json({ ok: true });
+  }
 
   if (body.action === "sale") {
     const requestedItems = Array.isArray(body.items)
@@ -290,4 +345,20 @@ function error(message: string, status = 400) {
 function readOrderIds(body: Record<string, unknown>) {
   const rawIds = Array.isArray(body.orderIds) ? body.orderIds : [body.orderId];
   return [...new Set(rawIds.map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+}
+
+async function adminToken() {
+  const bytes = new TextEncoder().encode(`inventory-admin:${ADMIN_PASSWORD}:local-session`);
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function isAdminRequest(request: Request) {
+  const cookie = request.headers.get("Cookie") || "";
+  const token = cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${ADMIN_COOKIE}=`))
+    ?.slice(ADMIN_COOKIE.length + 1);
+  return token === await adminToken();
 }
