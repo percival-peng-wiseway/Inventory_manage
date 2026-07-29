@@ -20,7 +20,19 @@ function db() {
   return (env as unknown as RuntimeEnv).DB;
 }
 
-async function ensureDatabase() {
+let databaseReady: Promise<void> | undefined;
+
+function ensureDatabase() {
+  if (!databaseReady) {
+    databaseReady = initializeDatabase().catch((error) => {
+      databaseReady = undefined;
+      throw error;
+    });
+  }
+  return databaseReady;
+}
+
+async function initializeDatabase() {
   const database = db();
   await database.batch([
     database.prepare(`CREATE TABLE IF NOT EXISTS inventory (
@@ -50,14 +62,25 @@ async function ensureDatabase() {
       items_json TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
+    database.prepare(`CREATE TABLE IF NOT EXISTS operations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      actor TEXT NOT NULL,
+      action TEXT NOT NULL,
+      detail TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
   ]);
 
   const count = await database.prepare("SELECT COUNT(*) AS count FROM inventory").first<{ count: number }>();
   if (!count?.count) {
     await database.batch(
-      seedItems.map(([sku, category, quantity]) =>
-        database.prepare("INSERT INTO inventory (sku, category, on_hand) VALUES (?, ?, ?)").bind(sku, category, quantity),
-      ),
+      [
+        ...seedItems.map(([sku, category, quantity]) =>
+          database.prepare("INSERT INTO inventory (sku, category, on_hand) VALUES (?, ?, ?)").bind(sku, category, quantity),
+        ),
+        database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
+          .bind("系统", "初始化库存", `共 ${seedItems.length} 个型号，合计 288`),
+      ],
     );
   }
 }
@@ -65,20 +88,23 @@ async function ensureDatabase() {
 export async function GET() {
   await ensureDatabase();
   const database = db();
-  const inventory = await database.prepare(`
-    SELECT
-      i.sku,
-      i.category,
-      i.on_hand,
-      COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS pending,
-      i.on_hand - COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS available
-    FROM inventory i
-    LEFT JOIN orders o ON i.sku = o.sku
-    GROUP BY i.sku, i.category, i.on_hand
-    ORDER BY CASE i.category WHEN '正常库存' THEN 0 ELSE 1 END, i.rowid
-  `).all();
-  const orders = await database.prepare("SELECT * FROM orders ORDER BY id DESC LIMIT 200").all();
-  return Response.json({ inventory: inventory.results, orders: orders.results });
+  const [inventory, orders, logs] = await Promise.all([
+    database.prepare(`
+      SELECT
+        i.sku,
+        i.category,
+        i.on_hand,
+        COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS pending,
+        i.on_hand - COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS available
+      FROM inventory i
+      LEFT JOIN orders o ON i.sku = o.sku
+      GROUP BY i.sku, i.category, i.on_hand
+      ORDER BY CASE i.category WHEN '正常库存' THEN 0 ELSE 1 END, i.rowid
+    `).all(),
+    database.prepare("SELECT * FROM orders ORDER BY id DESC LIMIT 200").all(),
+    database.prepare("SELECT * FROM operations ORDER BY id DESC LIMIT 300").all(),
+  ]);
+  return Response.json({ inventory: inventory.results, orders: orders.results, logs: logs.results });
 }
 
 export async function POST(request: Request) {
@@ -95,17 +121,16 @@ export async function POST(request: Request) {
     `).bind(sku).first<{ available: number }>();
     if (!quantity || quantity < 1) return error("销售数量必须大于 0");
     if (!available || quantity > available.available) return error(`可销售库存不足，目前只剩 ${available?.available ?? 0}`);
-    await database.prepare(`
-      INSERT INTO orders (sales_rep, customer, phone, sku, quantity, note)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).bind(
-      String(body.salesRep || ""),
-      String(body.customer || ""),
-      String(body.phone || ""),
-      sku,
-      quantity,
-      String(body.note || ""),
-    ).run();
+    const salesRep = String(body.salesRep || "");
+    const customer = String(body.customer || "");
+    await database.batch([
+      database.prepare(`
+        INSERT INTO orders (sales_rep, customer, phone, sku, quantity, note)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).bind(salesRep, customer, String(body.phone || ""), sku, quantity, String(body.note || "")),
+      database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
+        .bind(salesRep, "销售预留", `${customer} · ${sku} × ${quantity}`),
+    ]);
     return Response.json({ ok: true });
   }
 
@@ -116,6 +141,8 @@ export async function POST(request: Request) {
     `).bind(String(body.address || ""), String(body.plannedDate || ""), String(body.driver || "司机"), orderId).run();
     const order = await database.prepare("SELECT * FROM orders WHERE id = ?").bind(orderId).first<Record<string, unknown>>();
     if (!order) return error("找不到这个销售单", 404);
+    await database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
+      .bind("采购", "安排送货", `${order.customer} · ${order.sku} × ${order.quantity} · ${order.planned_date}`).run();
     const message = [
       "【送货安排】",
       `日期：${order.planned_date}`,
@@ -132,13 +159,15 @@ export async function POST(request: Request) {
   if (body.action === "deliver") {
     const orderId = Number(body.orderId);
     const order = await database.prepare("SELECT * FROM orders WHERE id = ? AND status = 'scheduled'")
-      .bind(orderId).first<{ sku: string; quantity: number }>();
+      .bind(orderId).first<{ sku: string; quantity: number; customer: string; driver: string | null }>();
     if (!order) return error("这个任务已经处理或不存在");
     await database.batch([
       database.prepare("UPDATE inventory SET on_hand = on_hand - ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ? AND on_hand >= ?")
         .bind(order.quantity, order.sku, order.quantity),
       database.prepare("UPDATE orders SET status = 'delivered', delivered_at = CURRENT_TIMESTAMP WHERE id = ?")
         .bind(orderId),
+      database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
+        .bind(order.driver || "司机", "确认送达", `${order.customer} · ${order.sku} × ${order.quantity}`),
     ]);
     return Response.json({ ok: true });
   }
@@ -156,6 +185,8 @@ export async function POST(request: Request) {
       ),
       database.prepare("INSERT INTO arrivals (raw_text, items_json) VALUES (?, ?)")
         .bind(String(body.rawText || ""), JSON.stringify(items)),
+      database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
+        .bind("采购", "新货入库", items.map((item) => `${item.sku} +${item.quantity}`).join("，")),
     ]);
     return Response.json({ ok: true });
   }

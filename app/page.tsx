@@ -27,17 +27,17 @@ type Order = {
 };
 
 type ParsedArrival = { sku: string; quantity: number };
-type ApiState = { inventory: InventoryItem[]; orders: Order[] };
-type View = "overview" | "sale" | "dispatch" | "arrival" | "driver";
-
-const statusLabel: Record<Order["status"], string> = {
-  pending: "Pending",
-  scheduled: "已安排",
-  delivered: "已送达",
-  cancelled: "已取消",
+type LogEntry = {
+  id: number;
+  actor: string;
+  action: string;
+  detail: string;
+  created_at: string;
 };
+type ApiState = { inventory: InventoryItem[]; orders: Order[]; logs: LogEntry[] };
+type View = "overview" | "sale" | "dispatch" | "arrival" | "driver" | "log";
 
-const initialState: ApiState = { inventory: [], orders: [] };
+const initialState: ApiState = { inventory: [], orders: [], logs: [] };
 
 export default function Home() {
   const [data, setData] = useState<ApiState>(initialState);
@@ -181,35 +181,26 @@ export default function Home() {
           <span className="brand-mark">仓</span>
           <div>
             <strong>简仓</strong>
-            <small>库存与送货协作台</small>
+            <small>库存管理</small>
           </div>
         </div>
-        <div className="live-pill"><span /> 实时库存</div>
+        <div className="topbar-stats">
+          <span>在库 <b>{loading ? "—" : totals.onHand}</b></span>
+          <span>Pending <b>{loading ? "—" : totals.pending}</b></span>
+        </div>
       </header>
-
-      <section className="hero">
-        <div>
-          <p className="eyebrow">今天的库存，一眼看清</p>
-          <h1>销售、采购、司机<br />在同一个流程里协作</h1>
-          <p className="hero-copy">销售提交即占库存，采购一键安排送货，司机完成后自动扣减实际库存。</p>
-        </div>
-        <div className="hero-total">
-          <span>当前实际库存</span>
-          <strong>{loading ? "—" : totals.onHand}</strong>
-          <small>件 · 更新于刚刚</small>
-        </div>
-      </section>
 
       <nav className="nav-tabs" aria-label="主要功能">
         {([
-          ["overview", "总览", "看库存"],
-          ["sale", "销售下单", "销售1 / 销售2"],
-          ["dispatch", "采购调度", `${waitingOrders.length} 单待安排`],
-          ["arrival", "新货入库", "自然语言"],
-          ["driver", "司机任务", `${driverOrders.length} 单待送`],
-        ] as [View, string, string][]).map(([key, label, sub]) => (
+          ["overview", "库存", ""],
+          ["sale", "销售下单", ""],
+          ["dispatch", "采购调度", waitingOrders.length ? String(waitingOrders.length) : ""],
+          ["arrival", "新货入库", ""],
+          ["driver", "司机任务", driverOrders.length ? String(driverOrders.length) : ""],
+          ["log", "操作日志", ""],
+        ] as [View, string, string][]).map(([key, label, count]) => (
           <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}>
-            <strong>{label}</strong><small>{sub}</small>
+            <strong>{label}</strong>{count && <span className="nav-count">{count}</span>}
           </button>
         ))}
       </nav>
@@ -218,7 +209,7 @@ export default function Home() {
         {view === "overview" && (
           <>
             <div className="section-heading">
-              <div><p className="eyebrow">库存总览</p><h2>可卖多少，清清楚楚</h2></div>
+              <div><h2>库存</h2></div>
               <button className="primary small" onClick={() => setView("sale")}>＋ 新建销售单</button>
             </div>
             <div className="stats">
@@ -253,9 +244,8 @@ export default function Home() {
         {view === "sale" && (
           <div className="form-layout">
             <div>
-              <p className="eyebrow">销售工作区</p>
-              <h2>建立销售表单</h2>
-              <p className="muted">提交后会立即成为 Pending，并从“可销售”数量中扣除。</p>
+              <h2>销售下单</h2>
+              <p className="muted">提交后自动占用可售库存。</p>
             </div>
             <form className="panel form-grid" onSubmit={handleSale}>
               <label>销售员<select name="salesRep" required><option>销售1</option><option>销售2</option></select></label>
@@ -272,7 +262,7 @@ export default function Home() {
         {view === "dispatch" && (
           <>
             <div className="section-heading">
-              <div><p className="eyebrow">采购工作区</p><h2>安排送货</h2><p className="muted">补充地址和日期，系统会生成司机消息。</p></div>
+              <div><h2>安排送货</h2></div>
             </div>
             {waitingOrders.length === 0 ? <Empty text="目前没有等待安排的销售单" /> :
               <div className="order-list">{waitingOrders.map((order) => (
@@ -305,9 +295,8 @@ export default function Home() {
         {view === "arrival" && (
           <div className="arrival-layout">
             <div>
-              <p className="eyebrow">采购工作区</p>
-              <h2>自然语言入库</h2>
-              <p className="muted">像平时发消息一样描述到货。系统先整理，确认后才会修改库存。</p>
+              <h2>新货入库</h2>
+              <p className="muted">输入到货内容，确认后入库。</p>
               <div className="example">例如：<br /><b>今天 KH10 到了 5，CQ7 S 20，JAM 440 2</b></div>
             </div>
             <div className="panel">
@@ -326,7 +315,7 @@ export default function Home() {
 
         {view === "driver" && (
           <>
-            <div className="section-heading"><div><p className="eyebrow">司机工作区</p><h2>今日待送任务</h2></div></div>
+            <div className="section-heading"><div><h2>司机任务</h2></div></div>
             {driverOrders.length === 0 ? <Empty text="目前没有待送任务" /> :
               <div className="driver-grid">{driverOrders.map((order) => (
                 <article className="driver-card" key={order.id}>
@@ -348,10 +337,34 @@ export default function Home() {
             }
           </>
         )}
+
+        {view === "log" && (
+          <>
+            <div className="section-heading"><div><h2>操作日志</h2></div></div>
+            <div className="table-card">
+              <div className="table-scroll">
+                <table>
+                  <thead><tr><th>时间</th><th>操作人</th><th>动作</th><th>内容</th></tr></thead>
+                  <tbody>
+                    {data.logs.length === 0 ? (
+                      <tr><td colSpan={4} className="empty-row">暂无操作记录</td></tr>
+                    ) : data.logs.map((entry) => (
+                      <tr key={entry.id}>
+                        <td className="log-time">{formatDateTime(entry.created_at)}</td>
+                        <td><b>{entry.actor}</b></td>
+                        <td><span className="log-action">{entry.action}</span></td>
+                        <td>{entry.detail}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
       </section>
 
       {toast && <div className="toast" role="status">{toast}</div>}
-      <footer>简仓 · 从 Pending 到送达，每一步都有记录</footer>
     </main>
   );
 }
@@ -362,4 +375,13 @@ function Empty({ text }: { text: string }) {
 
 function formatDate(value: string) {
   return new Date(value).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+}
+
+function formatDateTime(value: string) {
+  return new Date(`${value.replace(" ", "T")}Z`).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
