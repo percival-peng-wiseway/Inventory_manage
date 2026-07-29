@@ -304,7 +304,7 @@ export default function Home() {
     <main>
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark">仓</span>
+          <img className="brand-logo" src="/E3_logo.png" alt="E3 Energy logo" />
           <div>
             <strong>E3 energy Inventory</strong>
             <small>{tr("库存管理", "Inventory")}</small>
