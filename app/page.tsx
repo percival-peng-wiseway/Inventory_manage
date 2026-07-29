@@ -26,7 +26,7 @@ type Order = {
   note: string | null;
 };
 
-type ParsedArrival = { sku: string; quantity: number; isNew: boolean };
+type ParsedArrival = { sku: string; quantity: number; isNew: boolean; category: string };
 type LogEntry = {
   id: number;
   actor: string;
@@ -172,6 +172,25 @@ export default function Home() {
     }
   };
 
+  const cancelOrder = async (order: Order) => {
+    if (!window.confirm(tr(`确定删除 ${order.customer} 的订单？`, `Delete ${order.customer}'s order?`))) return;
+    try {
+      await mutate({ action: "cancelOrder", orderId: order.id });
+      notify(tr("订单已删除，Pending 库存已释放", "Order deleted and reserved stock released"));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : tr("删除失败", "Delete failed"));
+    }
+  };
+
+  const changeCategory = async (sku: string, category: string) => {
+    try {
+      await mutate({ action: "setCategory", sku, category });
+      notify(tr("库存类别已更新", "Category updated"));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : tr("更新失败", "Update failed"));
+    }
+  };
+
   const parseArrival = () => {
     const aliases = data.inventory
       .map((item) => item.sku)
@@ -193,10 +212,12 @@ export default function Home() {
       const sku = (existingSku || skuText.replace(/\s+/g, " ").toUpperCase()).trim();
       if (!sku || !quantity) continue;
       const current = parsedMap.get(sku);
+      const existingItem = data.inventory.find((item) => item.sku.toLowerCase() === sku.toLowerCase());
       parsedMap.set(sku, {
         sku,
         quantity: (current?.quantity || 0) + quantity,
-        isNew: !aliases.some((item) => item.toLowerCase() === sku.toLowerCase()),
+        isNew: !existingItem,
+        category: current?.category || existingItem?.category || "正常库存",
       });
     }
 
@@ -304,7 +325,18 @@ export default function Home() {
                     {filteredInventory.map((item) => (
                       <tr key={item.sku}>
                         <td><b>{item.sku}</b></td>
-                        <td>{item.category === "正常库存" ? tr("正常库存", "Regular") : tr("积存库存", "Aged stock")}</td>
+                        <td>
+                          <select
+                            className="inline-select"
+                            aria-label={`${item.sku} ${tr("类别", "category")}`}
+                            value={item.category}
+                            disabled={busy}
+                            onChange={(event) => changeCategory(item.sku, event.target.value)}
+                          >
+                            <option value="正常库存">{tr("正常库存", "Regular")}</option>
+                            <option value="积存库存">{tr("积存库存", "Aged stock")}</option>
+                          </select>
+                        </td>
                         <td>{item.on_hand}</td>
                         <td className="pending-number">{item.pending}</td>
                         <td><b>{item.available}</b></td>
@@ -354,7 +386,10 @@ export default function Home() {
                     <label>{tr("送货地址", "Address")}<input name="address" placeholder={tr("完整地址", "Full address")} required /></label>
                     <label>{tr("送货日期", "Delivery date")}<input name="plannedDate" type="date" required /></label>
                     <label>{tr("司机", "Driver")}<select name="driver"><option value="司机">{tr("司机", "Driver")}</option></select></label>
-                    <button className="primary" disabled={busy}>{tr("安排并生成消息", "Schedule & create message")}</button>
+                    <div className="dispatch-actions">
+                      <button className="primary" disabled={busy}>{tr("安排并生成消息", "Schedule & create message")}</button>
+                      <button type="button" className="danger" disabled={busy} onClick={() => cancelOrder(order)}>{tr("删除", "Delete")}</button>
+                    </div>
                   </form>
                 </article>
               ))}</div>
@@ -382,7 +417,21 @@ export default function Home() {
               {arrivalDraft.length > 0 && (
                 <div className="confirm-box">
                   <div className="confirm-title"><h3>{tr("请确认", "Confirm")}</h3><span>{tr("尚未录入", "Not saved")}</span></div>
-                  {arrivalDraft.map((item) => <div className="arrival-row" key={item.sku}><div><b>{item.sku}</b>{item.isNew && <em className="new-sku-badge">{tr("新 SKU", "New SKU")}</em>}</div><span>＋{item.quantity}</span></div>)}
+                  {arrivalDraft.map((item) => (
+                    <div className="arrival-row" key={item.sku}>
+                      <div><b>{item.sku}</b>{item.isNew && <em className="new-sku-badge">{tr("新 SKU", "New SKU")}</em>}</div>
+                      <select
+                        className="arrival-category"
+                        aria-label={`${item.sku} ${tr("类别", "category")}`}
+                        value={item.category}
+                        onChange={(event) => setArrivalDraft((current) => current.map((row) => row.sku === item.sku ? { ...row, category: event.target.value } : row))}
+                      >
+                        <option value="正常库存">{tr("正常库存", "Regular")}</option>
+                        <option value="积存库存">{tr("积存库存", "Aged stock")}</option>
+                      </select>
+                      <span>＋{item.quantity}</span>
+                    </div>
+                  ))}
                   <button className="primary full" onClick={confirmArrival} disabled={busy}>{tr("确认入库", "Confirm receipt")}</button>
                 </div>
               )}
@@ -474,6 +523,8 @@ function translateLog(value: string, lang: Language) {
     "确认送达": "Delivered",
     "新货入库": "Stock received",
     "初始化库存": "Inventory initialised",
+    "更改类别": "Category changed",
+    "删除订单": "Order deleted",
   };
   return translations[value] || value;
 }

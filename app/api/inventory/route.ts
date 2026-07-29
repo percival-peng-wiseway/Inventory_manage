@@ -134,6 +134,33 @@ export async function POST(request: Request) {
     return Response.json({ ok: true });
   }
 
+  if (body.action === "setCategory") {
+    const sku = String(body.sku || "").trim();
+    const category = String(body.category || "");
+    if (!["正常库存", "积存库存"].includes(category)) return error("库存类别无效");
+    const item = await database.prepare("SELECT sku FROM inventory WHERE sku = ?").bind(sku).first();
+    if (!item) return error("找不到这个型号", 404);
+    await database.batch([
+      database.prepare("UPDATE inventory SET category = ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ?").bind(category, sku),
+      database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
+        .bind("采购", "更改类别", `${sku} → ${category}`),
+    ]);
+    return Response.json({ ok: true });
+  }
+
+  if (body.action === "cancelOrder") {
+    const orderId = Number(body.orderId);
+    const order = await database.prepare("SELECT customer, sku, quantity FROM orders WHERE id = ? AND status = 'pending'")
+      .bind(orderId).first<{ customer: string; sku: string; quantity: number }>();
+    if (!order) return error("这个订单已经处理或不存在");
+    await database.batch([
+      database.prepare("UPDATE orders SET status = 'cancelled' WHERE id = ? AND status = 'pending'").bind(orderId),
+      database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
+        .bind("采购", "删除订单", `${order.customer} · ${order.sku} × ${order.quantity}`),
+    ]);
+    return Response.json({ ok: true });
+  }
+
   if (body.action === "schedule") {
     const orderId = Number(body.orderId);
     await database.prepare(`
@@ -178,20 +205,21 @@ export async function POST(request: Request) {
   }
 
   if (body.action === "arrival") {
-    const items = Array.isArray(body.items) ? body.items as Array<{ sku: string; quantity: number }> : [];
+    const items = Array.isArray(body.items) ? body.items as Array<{ sku: string; quantity: number; category: string }> : [];
     if (!items.length) return error("没有可入库的项目");
     for (const item of items) {
-      if (!item.sku || !Number.isInteger(item.quantity) || item.quantity < 1) return error("入库内容有误");
+      if (!item.sku || !Number.isInteger(item.quantity) || item.quantity < 1 || !["正常库存", "积存库存"].includes(item.category)) return error("入库内容有误");
     }
     await database.batch([
       ...items.map((item) =>
         database.prepare(`
           INSERT INTO inventory (sku, category, on_hand, updated_at)
-          VALUES (?, '正常库存', ?, CURRENT_TIMESTAMP)
+          VALUES (?, ?, ?, CURRENT_TIMESTAMP)
           ON CONFLICT(sku) DO UPDATE SET
             on_hand = on_hand + excluded.on_hand,
+            category = excluded.category,
             updated_at = CURRENT_TIMESTAMP
-        `).bind(item.sku.trim(), item.quantity),
+        `).bind(item.sku.trim(), item.category, item.quantity),
       ),
       database.prepare("INSERT INTO arrivals (raw_text, items_json) VALUES (?, ?)")
         .bind(String(body.rawText || ""), JSON.stringify(items)),
