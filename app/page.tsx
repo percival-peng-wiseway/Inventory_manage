@@ -478,7 +478,7 @@ export default function Home() {
                       <tr key={entry.id}>
                         <td className="log-time">{formatDateTime(entry.created_at, lang)}</td>
                         <td><b>{translateLog(entry.actor, lang)}</b></td>
-                        <td><span className="log-action">{translateLog(entry.action, lang)}</span></td>
+                        <td><span className={`log-action ${logActionClass(entry.action)}`}>{translateLog(entry.action, lang)}</span></td>
                         <td>{entry.detail}</td>
                       </tr>
                     ))}
@@ -527,4 +527,17 @@ function translateLog(value: string, lang: Language) {
     "删除订单": "Order deleted",
   };
   return translations[value] || value;
+}
+
+function logActionClass(action: string) {
+  const classes: Record<string, string> = {
+    "销售预留": "log-sale",
+    "安排送货": "log-dispatch",
+    "新货入库": "log-arrival",
+    "确认送达": "log-delivered",
+    "更改类别": "log-category",
+    "删除订单": "log-deleted",
+    "初始化库存": "log-initial",
+  };
+  return classes[action] || "log-default";
 }

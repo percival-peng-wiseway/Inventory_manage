@@ -125,7 +125,15 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
 .empty span { width: 48px; height: 48px; display: grid; place-items: center; margin: 0 auto 17px; border-radius: 50%; background: var(--mint); color: var(--forest); font-weight: 900; }
 .empty p { color: var(--muted); }
 .log-time { white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
-.log-action { display: inline-block; padding: 5px 9px; border-radius: 99px; background: var(--mint); color: var(--forest); font-size: 12px; font-weight: 800; }
+.log-action { display: inline-block; padding: 5px 9px; border-radius: 99px; font-size: 12px; font-weight: 800; }
+.log-sale { background: #fff0d4; color: #9a5a09; }
+.log-dispatch { background: #dfeafb; color: #315f9c; }
+.log-arrival { background: #dcf0ed; color: #23776c; }
+.log-delivered { background: #dff0e4; color: #276342; }
+.log-category { background: #eee4f8; color: #71449a; }
+.log-deleted { background: #fbe3df; color: #a13d32; }
+.log-initial { background: #e8e9e6; color: #59615c; }
+.log-default { background: var(--mint); color: var(--forest); }
 .empty-row { text-align: center; color: var(--muted); padding: 50px; }
 .toast { position: fixed; right: 24px; bottom: 24px; z-index: 10; padding: 14px 18px; border-radius: 10px; color: white; background: var(--ink); box-shadow: 0 12px 28px rgba(0,0,0,.22); font-weight: 700; }
 
