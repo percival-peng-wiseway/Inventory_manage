@@ -8,10 +8,13 @@ type RuntimeEnv = {
 };
 type OrderActionRow = {
   id: number;
+  order_group: string | null;
+  sales_rep: string;
   customer: string;
   phone: string | null;
   sku: string;
   quantity: number;
+  created_at: string;
   note: string | null;
   address: string | null;
   planned_date: string | null;
@@ -295,6 +298,87 @@ export async function POST(request: Request) {
         `地址：${address}`,
       ].join("\n");
     return Response.json({ ok: true, message });
+  }
+
+  if (body.action === "editTask") {
+    const orderIds = readOrderIds(body);
+    if (!orderIds.length) return error("找不到这个任务");
+    const placeholders = orderIds.map(() => "?").join(",");
+    const orderRows = await database.prepare(
+      `SELECT * FROM orders WHERE id IN (${placeholders}) AND status = 'scheduled' ORDER BY id`,
+    ).bind(...orderIds).all<OrderActionRow>();
+    if (orderRows.results.length !== orderIds.length) return error("这个任务已经处理或不存在");
+
+    const requestedItems = Array.isArray(body.items)
+      ? body.items as Array<{ sku: string; quantity: number }>
+      : [];
+    const merged = new Map<string, number>();
+    for (const item of requestedItems) {
+      const sku = String(item.sku || "").trim();
+      const quantity = Number(item.quantity);
+      if (!sku || !Number.isInteger(quantity) || quantity < 1) return error("商品型号或数量有误");
+      merged.set(sku, (merged.get(sku) || 0) + quantity);
+    }
+    const items = [...merged.entries()].map(([sku, quantity]) => ({ sku, quantity }));
+    if (!items.length) return error("请至少保留一个商品");
+
+    for (const item of items) {
+      const available = await database.prepare(`
+        SELECT i.on_hand - COALESCE(SUM(
+          CASE
+            WHEN o.status IN ('pending', 'scheduled') AND o.id NOT IN (${placeholders}) THEN o.quantity
+            ELSE 0
+          END
+        ), 0) AS available
+        FROM inventory i
+        LEFT JOIN orders o ON i.sku = o.sku
+        WHERE i.sku = ?
+        GROUP BY i.on_hand
+      `).bind(...orderIds, item.sku).first<{ available: number }>();
+      if (!available || item.quantity > available.available) {
+        return error(`${item.sku} 可用库存不足，目前最多可安排 ${available?.available ?? 0}`);
+      }
+    }
+
+    const firstOrder = orderRows.results[0];
+    const customer = String(body.customer || "").trim();
+    const phone = String(body.phone || "").trim();
+    const address = String(body.address || "").trim();
+    const plannedDate = String(body.plannedDate || "").trim();
+    const driver = String(body.driver || "").trim();
+    const salesRep = String(body.salesRep || "").trim();
+    const note = String(body.note || "").trim();
+    if (!customer || !address || !plannedDate || !driver || !salesRep) return error("请完整填写任务内容");
+
+    const orderGroup = firstOrder.order_group || crypto.randomUUID();
+    const itemText = items.map((item) => `${item.sku} × ${item.quantity}`).join("，");
+    await database.batch([
+      database.prepare(`DELETE FROM orders WHERE id IN (${placeholders}) AND status = 'scheduled'`).bind(...orderIds),
+      ...items.map((item) =>
+        database.prepare(`
+          INSERT INTO orders (
+            order_group, sales_rep, customer, phone, sku, quantity, created_at,
+            status, address, planned_date, driver, note
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?)
+        `).bind(
+          orderGroup,
+          salesRep,
+          customer,
+          phone,
+          item.sku,
+          item.quantity,
+          firstOrder.created_at,
+          address,
+          plannedDate,
+          driver,
+          note,
+        ),
+      ),
+      database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
+        .bind("采购", "修改任务", `${customer} · ${itemText} · ${plannedDate}`),
+    ]);
+    return Response.json({ ok: true });
   }
 
   if (body.action === "deliver") {
