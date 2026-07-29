@@ -147,6 +147,7 @@ export default function Home() {
         salesRep: orderActor,
         customer: form.get("customer"),
         phone: form.get("phone"),
+        address: form.get("address"),
         items: saleItems,
         note: form.get("note"),
       });
@@ -429,6 +430,7 @@ export default function Home() {
               <label>{tr("下单人", "Created by")}<select value={orderActor} onChange={(event) => setOrderActor(event.target.value)} required><option>Sam</option><option>RuiHan</option><option>Hogan</option><option>Kevin</option></select></label>
               <label>{tr("客户", "Customer")}<input name="customer" placeholder="ABC Energy" required /></label>
               <label>{tr("电话", "Phone")}<input name="phone" placeholder="04xx xxx xxx" /></label>
+              <label>{tr("送货地址", "Delivery address")}<input name="address" placeholder={tr("完整送货地址", "Full delivery address")} required /></label>
               <label>{tr("备注", "Note")}<input name="note" placeholder={tr("选填", "Optional")} /></label>
               <div className="sale-items">
                 <div className="sale-items-heading">
@@ -496,7 +498,7 @@ export default function Home() {
                     <small>{group.primary.sales_rep} · {formatDate(group.primary.created_at, lang)}</small>
                   </div>
                   <form className="dispatch-form" onSubmit={(event) => handleSchedule(event, group)}>
-                    <label>{tr("送货地址", "Address")}<input name="address" placeholder={tr("完整地址", "Full address")} required /></label>
+                    <label>{tr("送货地址", "Address")}<input name="address" defaultValue={group.primary.address || ""} placeholder={tr("完整地址", "Full address")} required /></label>
                     <label>{tr("送货日期", "Delivery date")}<input name="plannedDate" type="date" required /></label>
                     <label>{tr("司机", "Driver")}<select name="driver"><option value="司机">{tr("司机", "Driver")}</option></select></label>
                     <div className="dispatch-actions">
@@ -653,6 +655,7 @@ function groupOrderRows(orders: Order[]): OrderGroup[] {
       order.sales_rep,
       order.customer,
       order.phone || "",
+      order.address || "",
       order.created_at,
       order.note || "",
     ].join(":");

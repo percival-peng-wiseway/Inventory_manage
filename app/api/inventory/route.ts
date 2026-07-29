@@ -209,13 +209,15 @@ export async function POST(request: Request) {
 
     const salesRep = String(body.salesRep || "");
     const customer = String(body.customer || "");
+    const address = String(body.address || "").trim();
+    if (!address) return error("请填写送货地址");
     const orderGroup = crypto.randomUUID();
     await database.batch([
       ...items.map((item) =>
         database.prepare(`
-          INSERT INTO orders (order_group, sales_rep, customer, phone, sku, quantity, note)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).bind(orderGroup, salesRep, customer, String(body.phone || ""), item.sku, item.quantity, String(body.note || "")),
+          INSERT INTO orders (order_group, sales_rep, customer, phone, address, sku, quantity, note)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(orderGroup, salesRep, customer, String(body.phone || ""), address, item.sku, item.quantity, String(body.note || "")),
       ),
       database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
         .bind(salesRep, "销售预留", `${customer} · ${items.map((item) => `${item.sku} × ${item.quantity}`).join("，")}`),
