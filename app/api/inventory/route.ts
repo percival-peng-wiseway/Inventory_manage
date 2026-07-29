@@ -131,23 +131,40 @@ export async function POST(request: Request) {
   const database = db();
 
   if (body.action === "sale") {
-    const sku = String(body.sku || "");
-    const quantity = Number(body.quantity);
-    const available = await database.prepare(`
-      SELECT i.on_hand - COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS available
-      FROM inventory i LEFT JOIN orders o ON i.sku = o.sku WHERE i.sku = ? GROUP BY i.on_hand
-    `).bind(sku).first<{ available: number }>();
-    if (!quantity || quantity < 1) return error("销售数量必须大于 0");
-    if (!available || quantity > available.available) return error(`可销售库存不足，目前只剩 ${available?.available ?? 0}`);
+    const requestedItems = Array.isArray(body.items)
+      ? body.items as Array<{ sku: string; quantity: number }>
+      : [{ sku: String(body.sku || ""), quantity: Number(body.quantity) }];
+    const merged = new Map<string, number>();
+    for (const item of requestedItems) {
+      const sku = String(item.sku || "").trim();
+      const quantity = Number(item.quantity);
+      if (!sku || !Number.isInteger(quantity) || quantity < 1) return error("商品型号或数量有误");
+      merged.set(sku, (merged.get(sku) || 0) + quantity);
+    }
+    const items = [...merged.entries()].map(([sku, quantity]) => ({ sku, quantity }));
+    if (!items.length) return error("请至少添加一个商品");
+
+    for (const item of items) {
+      const available = await database.prepare(`
+        SELECT i.on_hand - COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS available
+        FROM inventory i LEFT JOIN orders o ON i.sku = o.sku WHERE i.sku = ? GROUP BY i.on_hand
+      `).bind(item.sku).first<{ available: number }>();
+      if (!available || item.quantity > available.available) {
+        return error(`${item.sku} 可销售库存不足，目前只剩 ${available?.available ?? 0}`);
+      }
+    }
+
     const salesRep = String(body.salesRep || "");
     const customer = String(body.customer || "");
     await database.batch([
-      database.prepare(`
-        INSERT INTO orders (sales_rep, customer, phone, sku, quantity, note)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).bind(salesRep, customer, String(body.phone || ""), sku, quantity, String(body.note || "")),
+      ...items.map((item) =>
+        database.prepare(`
+          INSERT INTO orders (sales_rep, customer, phone, sku, quantity, note)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).bind(salesRep, customer, String(body.phone || ""), item.sku, item.quantity, String(body.note || "")),
+      ),
       database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
-        .bind(salesRep, "销售预留", `${customer} · ${sku} × ${quantity}`),
+        .bind(salesRep, "销售预留", `${customer} · ${items.map((item) => `${item.sku} × ${item.quantity}`).join("，")}`),
     ]);
     return Response.json({ ok: true });
   }

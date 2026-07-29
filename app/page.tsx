@@ -28,6 +28,7 @@ type Order = {
 };
 
 type ParsedArrival = { sku: string; quantity: number; isNew: boolean; category: string };
+type SaleItem = { sku: string; quantity: number };
 type LogEntry = {
   id: number;
   actor: string;
@@ -52,6 +53,7 @@ export default function Home() {
   const [arrivalDraft, setArrivalDraft] = useState<ParsedArrival[]>([]);
   const [lang, setLang] = useState<Language>("zh");
   const [orderActor, setOrderActor] = useState("Sam");
+  const [saleItems, setSaleItems] = useState<SaleItem[]>([{ sku: "", quantity: 1 }]);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [stockFilter, setStockFilter] = useState("all");
@@ -131,17 +133,21 @@ export default function Home() {
   const handleSale = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    if (saleItems.some((item) => !item.sku || item.quantity < 1)) {
+      notify(tr("请完整填写所有商品", "Complete every item"));
+      return;
+    }
     try {
       await mutate({
         action: "sale",
         salesRep: orderActor,
         customer: form.get("customer"),
         phone: form.get("phone"),
-        sku: form.get("sku"),
-        quantity: Number(form.get("quantity")),
+        items: saleItems,
         note: form.get("note"),
       });
       event.currentTarget.reset();
+      setSaleItems([{ sku: "", quantity: 1 }]);
       notify(tr("销售单已提交，库存已转为 Pending", "Order submitted and inventory reserved"));
       setView("overview");
     } catch (error) {
@@ -359,9 +365,51 @@ export default function Home() {
               <label>{tr("下单人", "Created by")}<select value={orderActor} onChange={(event) => setOrderActor(event.target.value)} required><option>Sam</option><option>RuiHan</option><option>Hogan</option><option>Kevin</option></select></label>
               <label>{tr("客户", "Customer")}<input name="customer" placeholder="ABC Energy" required /></label>
               <label>{tr("电话", "Phone")}<input name="phone" placeholder="04xx xxx xxx" /></label>
-              <label>{tr("型号", "SKU")}<select name="sku" required>{data.inventory.map((item) => <option key={item.sku}>{item.sku}</option>)}</select></label>
-              <label>{tr("数量", "Quantity")}<input name="quantity" type="number" min="1" placeholder="0" required /></label>
               <label>{tr("备注", "Note")}<input name="note" placeholder={tr("选填", "Optional")} /></label>
+              <div className="sale-items">
+                <div className="sale-items-heading">
+                  <h3>{tr("商品", "Items")}</h3>
+                  <button
+                    type="button"
+                    className="add-line"
+                    onClick={() => setSaleItems((items) => [...items, { sku: "", quantity: 1 }])}
+                  >
+                    ＋ {tr("添加商品", "Add item")}
+                  </button>
+                </div>
+                {saleItems.map((line, index) => (
+                  <div className="sale-item-row" key={index}>
+                    <label>{tr("型号", "SKU")}
+                      <select
+                        value={line.sku}
+                        required
+                        onChange={(event) => setSaleItems((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, sku: event.target.value } : item))}
+                      >
+                        <option value="">{tr("选择型号", "Select SKU")}</option>
+                        {data.inventory.map((item) => <option key={item.sku}>{item.sku}</option>)}
+                      </select>
+                    </label>
+                    <label>{tr("数量", "Quantity")}
+                      <input
+                        type="number"
+                        min="1"
+                        value={line.quantity}
+                        required
+                        onChange={(event) => setSaleItems((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: Number(event.target.value) } : item))}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="remove-line"
+                      aria-label={tr("删除商品", "Remove item")}
+                      disabled={saleItems.length === 1}
+                      onClick={() => setSaleItems((items) => items.filter((_, itemIndex) => itemIndex !== index))}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
               <button className="primary full" disabled={busy}>{tr("提交并设为 Pending", "Submit as Pending")}</button>
             </form>
           </div>
