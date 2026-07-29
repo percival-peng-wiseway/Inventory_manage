@@ -143,16 +143,27 @@ export async function POST(request: Request) {
     if (!order) return error("找不到这个销售单", 404);
     await database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
       .bind("采购", "安排送货", `${order.customer} · ${order.sku} × ${order.quantity} · ${order.planned_date}`).run();
-    const message = [
-      "【送货安排】",
-      `日期：${order.planned_date}`,
-      `客户：${order.customer}`,
-      `电话：${order.phone || "未提供"}`,
-      `地址：${order.address}`,
-      `货物：${order.sku} × ${order.quantity}`,
-      `订单：#${String(order.id).padStart(4, "0")}`,
-      order.note ? `备注：${order.note}` : "",
-    ].filter(Boolean).join("\n");
+    const message = body.language === "en"
+      ? [
+        "DELIVERY",
+        `Date: ${order.planned_date}`,
+        `Customer: ${order.customer}`,
+        `Phone: ${order.phone || "Not provided"}`,
+        `Address: ${order.address}`,
+        `Items: ${order.sku} × ${order.quantity}`,
+        `Order: #${String(order.id).padStart(4, "0")}`,
+        order.note ? `Note: ${order.note}` : "",
+      ].filter(Boolean).join("\n")
+      : [
+        "【送货安排】",
+        `日期：${order.planned_date}`,
+        `客户：${order.customer}`,
+        `电话：${order.phone || "未提供"}`,
+        `地址：${order.address}`,
+        `货物：${order.sku} × ${order.quantity}`,
+        `订单：#${String(order.id).padStart(4, "0")}`,
+        order.note ? `备注：${order.note}` : "",
+      ].filter(Boolean).join("\n");
     return Response.json({ ok: true, message });
   }
 
