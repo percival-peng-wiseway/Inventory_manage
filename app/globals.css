@@ -73,6 +73,12 @@ th { padding: 11px 18px; color: var(--muted); font-size: 11px; text-align: left;
 td { padding: 12px 18px; border-top: 1px solid #eceee9; font-size: 13px; font-variant-numeric: tabular-nums; }
 tbody tr:hover { background: #fbfcf8; }
 .pending-number { color: #a55d0a; font-weight: 800; }
+.stock-number { font-size: 17px; line-height: 1; font-weight: 800; font-variant-numeric: tabular-nums; }
+.category-badge { display: inline-block; padding: 5px 9px; border: 1px solid; border-radius: 8px; font-size: 11px; font-weight: 800; }
+.category-battery { background: #e5effd; border-color: #b8cfee; color: #315f9c; }
+.category-solar { background: #fff0d4; border-color: #ead1a5; color: #9a5a09; }
+.category-accessory { background: #eee4f8; border-color: #d4bde8; color: #71449a; }
+.category-other { background: #eceeeb; border-color: #ccd1cc; color: #59615c; }
 .stock-status { display: inline-block; padding: 5px 9px; border-radius: 99px; background: #dff0e4; color: #276342; font-size: 12px; font-weight: 800; }
 .stock-status.low { background: #fff0d4; color: #a55d0a; }
 

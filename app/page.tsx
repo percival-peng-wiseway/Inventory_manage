@@ -323,10 +323,10 @@ export default function Home() {
                     {filteredInventory.map((item) => (
                       <tr key={item.sku}>
                         <td><b>{item.sku}</b></td>
-                        <td>{translateCategory(item.category, lang)}</td>
-                        <td>{item.on_hand}</td>
-                        <td className="pending-number">{item.pending}</td>
-                        <td><b>{item.available}</b></td>
+                        <td><span className={`category-badge ${categoryClass(item.category)}`}>{translateCategory(item.category, lang)}</span></td>
+                        <td className="stock-number">{item.on_hand}</td>
+                        <td className="stock-number pending-number">{item.pending}</td>
+                        <td className="stock-number">{item.available}</td>
                         <td>
                           <select
                             className={`status-select ${statusClass(item.status)}`}
@@ -554,6 +554,16 @@ function translateCategory(category: string, lang: Language) {
     "其他": "Other",
   };
   return categories[category] || category;
+}
+
+function categoryClass(category: string) {
+  const classes: Record<string, string> = {
+    "电池": "category-battery",
+    "太阳能板": "category-solar",
+    "安装配件": "category-accessory",
+    "其他": "category-other",
+  };
+  return classes[category] || "category-other";
 }
 
 function statusClass(status: string) {
