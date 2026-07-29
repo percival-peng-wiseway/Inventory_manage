@@ -1,19 +1,5 @@
 import { env } from "cloudflare:workers";
 
-const seedItems = [
-  ["KH10", "电池", 11, "充足"],
-  ["KH8", "电池", 17, "充足"],
-  ["H3 10.0", "电池", 7, "充足"],
-  ["H3 125", "电池", 1, "低库存"],
-  ["H1 5.0", "电池", 5, "低库存"],
-  ["H3 15.0", "电池", 4, "低库存"],
-  ["CQ7 S", "电池", 190, "充足"],
-  ["CQ7 M", "电池", 35, "充足"],
-  ["CQ7 M V6+", "电池", 7, "充足"],
-  ["EQ4800 S", "电池", 3, "积压"],
-  ["JAM 440", "电池", 8, "积压"],
-] as const;
-
 type RuntimeEnv = { DB: D1Database };
 type OrderActionRow = {
   id: number;
@@ -104,18 +90,6 @@ async function initializeDatabase() {
     WHERE category IN ('正常库存', '积存库存')
   `).run();
 
-  const count = await database.prepare("SELECT COUNT(*) AS count FROM inventory").first<{ count: number }>();
-  if (!count?.count) {
-    await database.batch(
-      [
-        ...seedItems.map(([sku, category, quantity, status]) =>
-          database.prepare("INSERT INTO inventory (sku, category, on_hand, status) VALUES (?, ?, ?, ?)").bind(sku, category, quantity, status),
-        ),
-        database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
-          .bind("系统", "初始化库存", `共 ${seedItems.length} 个型号，合计 288`),
-      ],
-    );
-  }
 }
 
 export async function GET() {
