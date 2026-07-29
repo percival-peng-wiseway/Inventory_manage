@@ -566,10 +566,10 @@ export default function Home() {
                   <div className="driver-date"><span>{tr("送货日期", "Delivery date")}</span><strong>{group.primary.planned_date || tr("待定", "TBC")}</strong></div>
                   <h3>{group.primary.customer}</h3>
                   <p>{group.primary.address}</p>
+                  {group.primary.phone && <a href={`tel:${group.primary.phone}`}>{group.primary.phone}</a>}
                   <div className="product-lines">
                     {group.orders.map((order) => <div className="product-line" key={order.id}><b>{order.sku}</b><strong>× {order.quantity}</strong></div>)}
                   </div>
-                  {group.primary.phone && <a href={`tel:${group.primary.phone}`}>{group.primary.phone}</a>}
                   <button className="primary full" disabled={busy} onClick={async () => {
                     try {
                       await mutate({ action: "deliver", orderIds: group.orders.map((order) => order.id) });
