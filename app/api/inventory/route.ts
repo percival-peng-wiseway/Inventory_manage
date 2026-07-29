@@ -1,9 +1,11 @@
 import { env } from "cloudflare:workers";
 
-const ADMIN_PASSWORD = "22224444";
 const ADMIN_COOKIE = "inventory_admin";
 
-type RuntimeEnv = { DB: D1Database };
+type RuntimeEnv = {
+  DB: D1Database;
+  ADMIN_PASSWORD?: string;
+};
 type OrderActionRow = {
   id: number;
   customer: string;
@@ -18,6 +20,10 @@ type OrderActionRow = {
 
 function db() {
   return (env as unknown as RuntimeEnv).DB;
+}
+
+function adminPassword() {
+  return String((env as unknown as RuntimeEnv).ADMIN_PASSWORD || "");
 }
 
 let databaseReady: Promise<void> | undefined;
@@ -129,7 +135,9 @@ export async function POST(request: Request) {
   const database = db();
 
   if (body.action === "adminLogin") {
-    if (String(body.password || "") !== ADMIN_PASSWORD) return error("管理员密码错误", 401);
+    const password = adminPassword();
+    if (!password) return error("管理员密码尚未配置", 503);
+    if (String(body.password || "") !== password) return error("管理员密码错误", 401);
     return Response.json(
       { ok: true },
       { headers: { "Set-Cookie": `${ADMIN_COOKIE}=${await adminToken()}; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800` } },
@@ -348,7 +356,9 @@ function readOrderIds(body: Record<string, unknown>) {
 }
 
 async function adminToken() {
-  const bytes = new TextEncoder().encode(`inventory-admin:${ADMIN_PASSWORD}:local-session`);
+  const password = adminPassword();
+  if (!password) return "";
+  const bytes = new TextEncoder().encode(`inventory-admin:${password}:local-session`);
   const hash = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
