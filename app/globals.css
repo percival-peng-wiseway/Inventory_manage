@@ -23,7 +23,7 @@ button { cursor: pointer; }
   background: var(--paper); border-bottom: 1px solid var(--line);
 }
 .brand { display: flex; align-items: center; gap: 12px; }
-.brand-mark { width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center; background: var(--forest); color: white; font-weight: 800; }
+.brand-logo { width: 46px; height: 46px; padding: 3px; border: 1px solid var(--line); border-radius: 11px; background: white; object-fit: contain; }
 .brand div { display: grid; gap: 2px; }
 .brand strong { font-size: 19px; letter-spacing: .08em; }
 .brand small { color: var(--muted); }
