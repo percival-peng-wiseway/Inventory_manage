@@ -26,7 +26,7 @@ type Order = {
   note: string | null;
 };
 
-type ParsedArrival = { sku: string; quantity: number };
+type ParsedArrival = { sku: string; quantity: number; isNew: boolean };
 type LogEntry = {
   id: number;
   actor: string;
@@ -72,6 +72,10 @@ export default function Home() {
   useEffect(() => {
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   }, [lang]);
+
+  useEffect(() => {
+    if (!["Sam", "RuiHan", "Hogan", "Kevin"].includes(orderActor)) setOrderActor("Sam");
+  }, [orderActor]);
 
   const notify = (text: string) => {
     setToast(text);
@@ -169,20 +173,34 @@ export default function Home() {
   };
 
   const parseArrival = () => {
-    const normalized = arrivalText.replace(/\n/g, "，");
     const aliases = data.inventory
       .map((item) => item.sku)
       .sort((a, b) => b.length - a.length);
-    const parsed: ParsedArrival[] = [];
+    const parsedMap = new Map<string, ParsedArrival>();
+    const segments = arrivalText.split(/[，,\n;；]+/).map((part) => part.trim()).filter(Boolean);
 
-    for (const sku of aliases) {
-      const escaped = sku.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s*");
-      const match = normalized.match(
-        new RegExp(`${escaped}\\s*(?:到货|到了|入库|新增|加|有|arrived|received|add)?\\s*[xX×:]?\\s*(\\d+)`, "i"),
-      );
-      if (match) parsed.push({ sku, quantity: Number(match[1]) });
+    for (const segment of segments) {
+      const quantityMatch = segment.match(/(\d+)\s*(?:个|件|pcs?|units?)?\s*$/i);
+      if (!quantityMatch) continue;
+      const quantity = Number(quantityMatch[1]);
+      let skuText = segment.slice(0, quantityMatch.index).trim()
+        .replace(/^(?:今天|今日|新货|到货|入库|新增\s*sku|创建\s*sku|new\s*sku|received|receive|new\s*stock|stock)\s*/i, "")
+        .replace(/\s*(?:到货|到了|入库|新增|加|有|arrived|received|add)\s*$/i, "")
+        .replace(/[xX×:：]\s*$/, "")
+        .trim();
+      const compact = skuText.replace(/\s+/g, "").toLowerCase();
+      const existingSku = aliases.find((sku) => compact === sku.replace(/\s+/g, "").toLowerCase());
+      const sku = (existingSku || skuText.replace(/\s+/g, " ").toUpperCase()).trim();
+      if (!sku || !quantity) continue;
+      const current = parsedMap.get(sku);
+      parsedMap.set(sku, {
+        sku,
+        quantity: (current?.quantity || 0) + quantity,
+        isNew: !aliases.some((item) => item.toLowerCase() === sku.toLowerCase()),
+      });
     }
 
+    const parsed = [...parsedMap.values()];
     setArrivalDraft(parsed);
     if (!parsed.length) notify(tr("没有识别到型号和数量，例如：KH10 5，CQ7 S 20", "No SKU and quantity found. Try: KH10 5, CQ7 S 20"));
   };
@@ -304,10 +322,10 @@ export default function Home() {
           <div className="form-layout">
             <div>
               <h2>{tr("下单", "New order")}</h2>
-              <p className="muted">{tr("销售或采购均可下单。", "Sales or purchasing can create an order.")}</p>
+              <p className="muted">Sam · RuiHan · Hogan · Kevin</p>
             </div>
             <form className="panel form-grid" onSubmit={handleSale}>
-              <label>{tr("下单人", "Created by")}<select value={orderActor} onChange={(event) => setOrderActor(event.target.value)} required><option>Sam</option><option>RuiHan</option><option value="采购">{tr("采购", "Purchasing")}</option></select></label>
+              <label>{tr("下单人", "Created by")}<select value={orderActor} onChange={(event) => setOrderActor(event.target.value)} required><option>Sam</option><option>RuiHan</option><option>Hogan</option><option>Kevin</option></select></label>
               <label>{tr("客户", "Customer")}<input name="customer" placeholder="ABC Energy" required /></label>
               <label>{tr("电话", "Phone")}<input name="phone" placeholder="04xx xxx xxx" /></label>
               <label>{tr("型号", "SKU")}<select name="sku" required>{data.inventory.map((item) => <option key={item.sku}>{item.sku}</option>)}</select></label>
@@ -322,9 +340,6 @@ export default function Home() {
           <>
             <div className="section-heading">
               <div><h2>{tr("安排送货", "Dispatch")}</h2></div>
-              <button className="secondary small" onClick={() => { setOrderActor("采购"); setView("sale"); }}>
-                ＋ {tr("采购下单", "Purchasing order")}
-              </button>
             </div>
             {waitingOrders.length === 0 ? <Empty text={tr("没有待安排订单", "No orders to dispatch")} sub={tr("新订单会显示在这里。", "New orders will appear here.")} /> :
               <div className="order-list">{waitingOrders.map((order) => (
@@ -367,7 +382,7 @@ export default function Home() {
               {arrivalDraft.length > 0 && (
                 <div className="confirm-box">
                   <div className="confirm-title"><h3>{tr("请确认", "Confirm")}</h3><span>{tr("尚未录入", "Not saved")}</span></div>
-                  {arrivalDraft.map((item) => <div className="arrival-row" key={item.sku}><b>{item.sku}</b><span>＋{item.quantity}</span></div>)}
+                  {arrivalDraft.map((item) => <div className="arrival-row" key={item.sku}><div><b>{item.sku}</b>{item.isNew && <em className="new-sku-badge">{tr("新 SKU", "New SKU")}</em>}</div><span>＋{item.quantity}</span></div>)}
                   <button className="primary full" onClick={confirmArrival} disabled={busy}>{tr("确认入库", "Confirm receipt")}</button>
                 </div>
               )}
