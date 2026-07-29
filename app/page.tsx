@@ -62,6 +62,9 @@ export default function Home() {
   const [sortBy, setSortBy] = useState("sku");
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
+  const [deliveryConfirmGroup, setDeliveryConfirmGroup] = useState<OrderGroup | null>(null);
+  const [editingTask, setEditingTask] = useState<OrderGroup | null>(null);
+  const [taskEditItems, setTaskEditItems] = useState<SaleItem[]>([]);
   const tr = (zh: string, en: string) => lang === "zh" ? zh : en;
 
   const refresh = async () => {
@@ -299,6 +302,54 @@ export default function Home() {
   const copyMessage = async () => {
     await navigator.clipboard.writeText(message);
     notify(tr("司机消息已复制", "Driver message copied"));
+  };
+
+  const confirmDelivery = async () => {
+    if (!deliveryConfirmGroup) return;
+    try {
+      await mutate({
+        action: "deliver",
+        orderIds: deliveryConfirmGroup.orders.map((order) => order.id),
+      });
+      setDeliveryConfirmGroup(null);
+      notify(tr("已确认送达，实际库存已扣减", "Delivered and stock updated"));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : tr("确认送达失败", "Could not confirm delivery"));
+    }
+  };
+
+  const openTaskEditor = (group: OrderGroup) => {
+    setTaskEditItems(group.orders.map((order) => ({ sku: order.sku, quantity: order.quantity })));
+    setEditingTask(group);
+  };
+
+  const handleTaskEdit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editingTask) return;
+    if (taskEditItems.some((item) => !item.sku || item.quantity < 1)) {
+      notify(tr("请完整填写所有商品", "Complete every item"));
+      return;
+    }
+    const form = new FormData(event.currentTarget);
+    try {
+      await mutate({
+        action: "editTask",
+        orderIds: editingTask.orders.map((order) => order.id),
+        customer: form.get("customer"),
+        phone: form.get("phone"),
+        address: form.get("address"),
+        plannedDate: form.get("plannedDate"),
+        driver: form.get("driver"),
+        salesRep: form.get("salesRep"),
+        note: form.get("note"),
+        items: taskEditItems,
+      });
+      setEditingTask(null);
+      setTaskEditItems([]);
+      notify(tr("任务内容已更新", "Task updated"));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : tr("修改失败", "Update failed"));
+    }
   };
 
   return (
@@ -570,14 +621,14 @@ export default function Home() {
                   <div className="product-lines">
                     {group.orders.map((order) => <div className="product-line" key={order.id}><b>{order.sku}</b><strong>× {order.quantity}</strong></div>)}
                   </div>
-                  <button className="primary full" disabled={busy} onClick={async () => {
-                    try {
-                      await mutate({ action: "deliver", orderIds: group.orders.map((order) => order.id) });
-                      notify(tr("已确认送达，实际库存已扣减", "Delivered and stock updated"));
-                    } catch (error) {
-                      notify(error instanceof Error ? error.message : "操作失败");
-                    }
-                  }}>{tr("确认送达", "Mark delivered")}</button>
+                  <div className="driver-actions">
+                    <button className="primary full" disabled={busy} onClick={() => setDeliveryConfirmGroup(group)}>
+                      {tr("确认送达", "Mark delivered")}
+                    </button>
+                    <button className="secondary full" disabled={busy} onClick={() => openTaskEditor(group)}>
+                      {tr("修改任务", "Edit task")}
+                    </button>
+                  </div>
                 </article>
               ))}</div>
             }
@@ -613,6 +664,158 @@ export default function Home() {
           </>
         )}
       </section>
+
+      {deliveryConfirmGroup && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={() => !busy && setDeliveryConfirmGroup(null)}
+        >
+          <div
+            className="confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delivery-confirm-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div>
+              <h3 id="delivery-confirm-title">{tr("是否确认已送达？", "Confirm delivery?")}</h3>
+              <p>
+                {tr(
+                  `确认后将扣减 ${deliveryConfirmGroup.primary.customer} 的实际库存，此操作不能撤销。`,
+                  `This will deduct stock for ${deliveryConfirmGroup.primary.customer} and cannot be undone.`,
+                )}
+              </p>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="secondary" disabled={busy} onClick={() => setDeliveryConfirmGroup(null)}>
+                {tr("取消", "Cancel")}
+              </button>
+              <button type="button" className="primary" disabled={busy} onClick={confirmDelivery}>
+                {tr("确认已送达", "Confirm delivered")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingTask && (
+        <div
+          className="modal-backdrop task-modal-backdrop"
+          role="presentation"
+          onMouseDown={() => !busy && setEditingTask(null)}
+        >
+          <form
+            key={editingTask.key}
+            className="task-modal"
+            onSubmit={handleTaskEdit}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="task-modal-header">
+              <div>
+                <h3>{tr("修改任务", "Edit task")}</h3>
+                <p>{tr("可修改联系人、日期、地址、司机及商品。", "Update contact, date, address, driver, and items.")}</p>
+              </div>
+              <button
+                type="button"
+                className="modal-close"
+                aria-label={tr("关闭", "Close")}
+                disabled={busy}
+                onClick={() => setEditingTask(null)}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="task-form-grid">
+              <label>{tr("客户", "Customer")}
+                <input name="customer" defaultValue={editingTask.primary.customer} required />
+              </label>
+              <label>{tr("电话", "Phone")}
+                <input name="phone" defaultValue={editingTask.primary.phone || ""} inputMode="tel" />
+              </label>
+              <label className="task-field-wide">{tr("送货地址", "Delivery address")}
+                <input name="address" defaultValue={editingTask.primary.address || ""} required />
+              </label>
+              <label>{tr("送货日期", "Delivery date")}
+                <input name="plannedDate" type="date" defaultValue={editingTask.primary.planned_date || ""} required />
+              </label>
+              <label>{tr("司机", "Driver")}
+                <input name="driver" defaultValue={editingTask.primary.driver || tr("司机", "Driver")} required />
+              </label>
+              <label>{tr("销售", "Sales rep")}
+                <select name="salesRep" defaultValue={editingTask.primary.sales_rep} required>
+                  <option>Sam</option>
+                  <option>RuiHan</option>
+                  <option>Hogan</option>
+                  <option>Kevin</option>
+                </select>
+              </label>
+              <label>{tr("备注", "Note")}
+                <input name="note" defaultValue={editingTask.primary.note || ""} placeholder={tr("选填", "Optional")} />
+              </label>
+            </div>
+
+            <div className="task-edit-items">
+              <div className="sale-items-heading">
+                <h3>{tr("商品", "Items")}</h3>
+                <button
+                  type="button"
+                  className="add-line"
+                  onClick={() => setTaskEditItems((items) => [...items, { sku: "", quantity: 1 }])}
+                >
+                  ＋ {tr("添加商品", "Add item")}
+                </button>
+              </div>
+              {taskEditItems.map((line, index) => (
+                <div className="sale-item-row" key={`${line.sku}-${index}`}>
+                  <label>{tr("型号", "SKU")}
+                    <select
+                      value={line.sku}
+                      required
+                      onChange={(event) => setTaskEditItems((items) =>
+                        items.map((item, itemIndex) => itemIndex === index ? { ...item, sku: event.target.value } : item)
+                      )}
+                    >
+                      <option value="">{tr("选择型号", "Select SKU")}</option>
+                      {data.inventory.map((item) => <option key={item.sku}>{item.sku}</option>)}
+                    </select>
+                  </label>
+                  <label>{tr("数量", "Quantity")}
+                    <input
+                      type="number"
+                      min="1"
+                      value={line.quantity}
+                      required
+                      onChange={(event) => setTaskEditItems((items) =>
+                        items.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: Number(event.target.value) } : item)
+                      )}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="remove-line"
+                    aria-label={tr("删除商品", "Remove item")}
+                    disabled={taskEditItems.length === 1}
+                    onClick={() => setTaskEditItems((items) => items.filter((_, itemIndex) => itemIndex !== index))}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="modal-actions task-modal-actions">
+              <button type="button" className="secondary" disabled={busy} onClick={() => setEditingTask(null)}>
+                {tr("取消", "Cancel")}
+              </button>
+              <button className="primary" disabled={busy}>
+                {tr("保存修改", "Save changes")}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {showAdminLogin && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowAdminLogin(false)}>
@@ -686,6 +889,7 @@ function translateLog(value: string, lang: Language) {
     "销售预留": "Order reserved",
     "安排送货": "Delivery scheduled",
     "确认送达": "Delivered",
+    "修改任务": "Task updated",
     "新货入库": "Stock received",
     "初始化库存": "Inventory initialised",
     "更改类别": "Category changed",
@@ -701,6 +905,7 @@ function logActionClass(action: string) {
     "安排送货": "log-dispatch",
     "新货入库": "log-arrival",
     "确认送达": "log-delivered",
+    "修改任务": "log-dispatch",
     "更改类别": "log-category",
     "更改状态": "log-category",
     "删除订单": "log-deleted",
