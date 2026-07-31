@@ -118,6 +118,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
 .delete-mini { border: 1px solid #e3bdb7; border-radius: 7px; padding: 6px 9px; background: #fff6f4; color: #a13d32; font-size: 11px; font-weight: 800; white-space: nowrap; }
 .delete-mini:hover { background: #fce8e4; }
 .delete-mini:disabled { opacity: .45; cursor: not-allowed; }
+.inventory-actions { display: flex; gap: 6px; }
+.edit-mini { border: 1px solid #bad8c4; border-radius: 7px; padding: 6px 9px; background: var(--mint); color: var(--forest); font-size: 11px; font-weight: 800; white-space: nowrap; }
+.edit-mini:hover { background: #cee3d5; }
+.edit-mini:disabled { opacity: .45; cursor: not-allowed; }
 .message-box { margin-top: 22px; display: grid; grid-template-columns: 180px 1fr auto; gap: 20px; align-items: center; background: var(--forest); color: white; border-radius: 16px; padding: 22px; }
 .message-box .eyebrow { color: #a9d2bc; }
 .message-box pre { white-space: pre-wrap; margin: 0; padding: 15px; background: rgba(255,255,255,.08); border-radius: 9px; font: 13px/1.7 var(--font-geist-mono); }
@@ -131,6 +135,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
 .arrival-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 12px; padding: 12px 2px; border-bottom: 1px solid var(--line); }
 .arrival-row span { color: var(--forest-2); font-weight: 800; }
 .arrival-category, .status-select { width: auto; min-width: 112px; padding: 6px 8px; border-radius: 7px; font-size: 11px; font-weight: 700; }
+.status-label { display: inline-block; min-width: 92px; padding: 6px 9px; border: 1px solid; border-radius: 7px; text-align: center; font-size: 11px; font-weight: 800; }
 .status-sufficient { background: #dff0e4; border-color: #bad8c4; color: #276342; }
 .status-overstock { background: #dfeafb; border-color: #bed0ea; color: #315f9c; }
 .status-low { background: #fff0d4; border-color: #ead1a5; color: #9a5a09; }
@@ -172,6 +177,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
 .confirm-modal p { margin: 8px 0 0; color: var(--muted); line-height: 1.7; }
 .task-modal-backdrop { overflow-y: auto; }
 .task-modal { width: min(780px, 100%); max-height: calc(100vh - 40px); overflow-y: auto; display: grid; gap: 22px; padding: 28px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper); box-shadow: 0 24px 70px rgba(0,0,0,.2); }
+.inventory-modal { width: min(580px, 100%); }
 .task-modal-header { display: flex; justify-content: space-between; gap: 20px; align-items: start; }
 .task-modal-header h3 { font-size: 25px; }
 .task-modal-header p { margin: 6px 0 0; color: var(--muted); }
@@ -179,6 +185,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
 .task-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .task-field-wide { grid-column: 1 / -1; }
 .task-edit-items { padding-top: 2px; }
+.inventory-derived { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 16px; border-radius: 11px; background: var(--mint); color: var(--forest); }
+.inventory-derived span { display: flex; justify-content: space-between; gap: 12px; }
+.inventory-derived small { grid-column: 1 / -1; color: var(--muted); }
 .task-modal-actions { padding-top: 18px; border-top: 1px solid var(--line); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
 
@@ -230,6 +239,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
   .task-modal-header h3 { font-size: 22px; }
   .task-form-grid { grid-template-columns: 1fr; gap: 13px; }
   .task-field-wide { grid-column: auto; }
+  .inventory-derived { grid-template-columns: 1fr; }
+  .inventory-derived small { grid-column: auto; }
+  .inventory-actions { min-width: 118px; }
   .task-edit-items .sale-item-row { padding: 10px; }
   .task-modal-actions { position: sticky; bottom: -20px; margin: 0 -16px -20px; padding: 14px 16px max(14px, env(safe-area-inset-bottom)); background: var(--paper); }
 }
