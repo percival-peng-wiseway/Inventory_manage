@@ -407,7 +407,7 @@ export default function Home() {
           ["sale", tr("销售下单", "New order"), ""],
           ["dispatch", tr("采购调度", "Dispatch"), waitingGroups.length ? String(waitingGroups.length) : ""],
           ["arrival", tr("新货入库", "Receive stock"), ""],
-          ["driver", tr("司机任务", "Driver"), driverGroups.length ? String(driverGroups.length) : ""],
+          ["driver", tr("送货任务", "Dispatch Tasks"), driverGroups.length ? String(driverGroups.length) : ""],
           ["log", tr("操作日志", "Activity log"), ""],
         ] as [View, string, string][]).map(([key, label, count]) => (
           <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}>
@@ -648,7 +648,7 @@ export default function Home() {
 
         {view === "driver" && (
           <>
-            <div className="section-heading"><div><h2>{tr("司机任务", "Driver tasks")}</h2></div></div>
+            <div className="section-heading"><div><h2>{tr("送货任务", "Dispatch Tasks")}</h2></div></div>
             {driverGroups.length === 0 ? <Empty text={tr("没有待送任务", "No deliveries")} sub={tr("新任务会显示在这里。", "New tasks will appear here.")} /> :
               <div className="driver-grid">{driverGroups.map((group) => (
                 <article className="driver-card" key={group.key}>
