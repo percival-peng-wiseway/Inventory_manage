@@ -193,6 +193,19 @@ export default function Home() {
     }
   };
 
+  const cancelDelivery = async (group: OrderGroup) => {
+    if (!window.confirm(tr(
+      `确定取消 ${group.primary.customer} 的送货订单？取消后 Pending 库存将释放。`,
+      `Cancel ${group.primary.customer}'s delivery order? The reserved stock will be released.`,
+    ))) return;
+    try {
+      await mutate({ action: "cancelDelivery", orderIds: group.orders.map((order) => order.id) });
+      notify(tr("送货订单已取消，Pending 库存已释放", "Delivery order cancelled and reserved stock released"));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : tr("取消送货订单失败", "Could not cancel delivery order"));
+    }
+  };
+
   const changeStatus = async (sku: string, status: string) => {
     try {
       await mutate({ action: "setStatus", sku, status });
@@ -666,6 +679,11 @@ export default function Home() {
                     <button className="secondary full" disabled={busy} onClick={() => openTaskEditor(group)}>
                       {tr("修改任务", "Edit task")}
                     </button>
+                    {data.admin && (
+                      <button className="danger full" disabled={busy} onClick={() => cancelDelivery(group)}>
+                        {tr("取消送货订单", "Cancel delivery order")}
+                      </button>
+                    )}
                   </div>
                 </article>
               ))}</div>
@@ -999,6 +1017,7 @@ function translateLog(value: string, lang: Language) {
     "销售预留": "Order reserved",
     "安排送货": "Delivery scheduled",
     "确认送达": "Delivered",
+    "取消送货": "Delivery cancelled",
     "修改任务": "Task updated",
     "修改库存": "Inventory updated",
     "新货入库": "Stock received",
@@ -1017,6 +1036,7 @@ function logActionClass(action: string) {
     "安排送货": "log-dispatch",
     "新货入库": "log-arrival",
     "确认送达": "log-delivered",
+    "取消送货": "log-deleted",
     "修改任务": "log-dispatch",
     "修改库存": "log-category",
     "更改类别": "log-category",

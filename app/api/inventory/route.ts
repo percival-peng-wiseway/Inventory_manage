@@ -305,6 +305,28 @@ export async function POST(request: Request) {
     return Response.json({ ok: true });
   }
 
+  if (body.action === "cancelDelivery") {
+    if (!await isAdminRequest(request)) return error("需要管理员权限", 403);
+    const orderIds = readOrderIds(body);
+    if (!orderIds.length) return error("找不到这个送货订单");
+    const placeholders = orderIds.map(() => "?").join(",");
+    const orderRows = await database.prepare(
+      `SELECT * FROM orders WHERE id IN (${placeholders}) AND status = 'scheduled' ORDER BY id`,
+    ).bind(...orderIds).all<OrderActionRow>();
+    if (orderRows.results.length !== orderIds.length) return error("这个送货订单已经处理或不存在");
+
+    const firstOrder = orderRows.results[0];
+    const itemText = orderRows.results.map((order) => `${order.sku} × ${order.quantity}`).join("，");
+    await database.batch([
+      ...orderIds.map((orderId) =>
+        database.prepare("UPDATE orders SET status = 'cancelled' WHERE id = ? AND status = 'scheduled'").bind(orderId),
+      ),
+      database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
+        .bind("管理员", "取消送货", `${firstOrder.customer} · ${itemText}`),
+    ]);
+    return Response.json({ ok: true });
+  }
+
   if (body.action === "schedule") {
     const orderIds = readOrderIds(body);
     if (!orderIds.length) return error("找不到这个销售单", 404);
