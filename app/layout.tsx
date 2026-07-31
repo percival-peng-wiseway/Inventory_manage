@@ -7,13 +7,13 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 
 export const metadata: Metadata = {
   title: "E3 energy Inventory",
-  description: "库存与送货管理",
+  description: "Inventory and delivery management",
   icons: { icon: "/E3_logo.png", shortcut: "/E3_logo.png" },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="zh-CN">
+    <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>{children}</body>
     </html>
   );

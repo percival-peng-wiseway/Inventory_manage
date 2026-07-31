@@ -154,6 +154,49 @@ export async function POST(request: Request) {
     );
   }
 
+  if (body.action === "editInventory") {
+    if (!await isAdminRequest(request)) return error("需要管理员权限", 403);
+    const originalSku = String(body.originalSku || "").trim();
+    const sku = String(body.sku || "").trim();
+    const category = String(body.category || "");
+    const status = String(body.status || "");
+    const onHand = Number(body.onHand);
+    if (!originalSku || !sku) return error("型号无效");
+    if (!["电池", "太阳能板", "逆变器", "安装配件", "其他"].includes(category)) return error("库存类别无效");
+    if (!["充足", "积压", "低库存"].includes(status)) return error("库存状态无效");
+    if (!Number.isInteger(onHand) || onHand < 0) return error("实际库存必须是非负整数");
+
+    const item = await database.prepare("SELECT sku FROM inventory WHERE sku = ?")
+      .bind(originalSku).first<{ sku: string }>();
+    if (!item) return error("找不到这个型号", 404);
+    if (sku !== originalSku) {
+      const duplicate = await database.prepare("SELECT sku FROM inventory WHERE sku = ?")
+        .bind(sku).first<{ sku: string }>();
+      if (duplicate) return error("新型号已经存在");
+    }
+
+    const reserved = await database.prepare(`
+      SELECT COALESCE(SUM(quantity), 0) AS quantity
+      FROM orders
+      WHERE sku = ? AND status IN ('pending', 'scheduled')
+    `).bind(originalSku).first<{ quantity: number }>();
+    if (onHand < (reserved?.quantity || 0)) {
+      return error(`实际库存不能低于已预留数量 ${reserved?.quantity || 0}`);
+    }
+
+    await database.batch([
+      database.prepare(`
+        UPDATE inventory
+        SET sku = ?, category = ?, status = ?, on_hand = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE sku = ?
+      `).bind(sku, category, status, onHand, originalSku),
+      database.prepare("UPDATE orders SET sku = ? WHERE sku = ?").bind(sku, originalSku),
+      database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
+        .bind("管理员", "修改库存", `${originalSku} → ${sku} · ${category} · ${onHand} · ${status}`),
+    ]);
+    return Response.json({ ok: true });
+  }
+
   if (body.action === "deleteSku") {
     if (!await isAdminRequest(request)) return error("需要管理员权限", 403);
     const sku = String(body.sku || "").trim();
@@ -229,6 +272,7 @@ export async function POST(request: Request) {
   }
 
   if (body.action === "setStatus") {
+    if (!await isAdminRequest(request)) return error("需要管理员权限", 403);
     const sku = String(body.sku || "").trim();
     const status = String(body.status || "");
     if (!["充足", "积压", "低库存"].includes(status)) return error("库存状态无效");
@@ -450,11 +494,13 @@ async function adminToken() {
 }
 
 async function isAdminRequest(request: Request) {
+  const password = adminPassword();
+  if (!password) return false;
   const cookie = request.headers.get("Cookie") || "";
   const token = cookie
     .split(";")
     .map((part) => part.trim())
     .find((part) => part.startsWith(`${ADMIN_COOKIE}=`))
     ?.slice(ADMIN_COOKIE.length + 1);
-  return token === await adminToken();
+  return Boolean(token) && token === await adminToken();
 }

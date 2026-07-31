@@ -53,7 +53,7 @@ export default function Home() {
   const [message, setMessage] = useState("");
   const [arrivalText, setArrivalText] = useState("");
   const [arrivalDraft, setArrivalDraft] = useState<ParsedArrival[]>([]);
-  const [lang, setLang] = useState<Language>("zh");
+  const [lang, setLang] = useState<Language>("en");
   const [orderActor, setOrderActor] = useState("Sam");
   const [saleItems, setSaleItems] = useState<SaleItem[]>([{ sku: "", quantity: 1 }]);
   const [search, setSearch] = useState("");
@@ -62,6 +62,7 @@ export default function Home() {
   const [sortBy, setSortBy] = useState("sku");
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
+  const [editingInventory, setEditingInventory] = useState<InventoryItem | null>(null);
   const [deliveryConfirmGroup, setDeliveryConfirmGroup] = useState<OrderGroup | null>(null);
   const [editingTask, setEditingTask] = useState<OrderGroup | null>(null);
   const [taskEditItems, setTaskEditItems] = useState<SaleItem[]>([]);
@@ -232,6 +233,26 @@ export default function Home() {
     }
   };
 
+  const handleInventoryEdit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editingInventory) return;
+    const form = new FormData(event.currentTarget);
+    try {
+      await mutate({
+        action: "editInventory",
+        originalSku: editingInventory.sku,
+        sku: form.get("sku"),
+        category: form.get("category"),
+        status: form.get("status"),
+        onHand: Number(form.get("onHand")),
+      });
+      setEditingInventory(null);
+      notify(tr("库存信息已更新", "Inventory item updated"));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : tr("修改失败", "Update failed"));
+    }
+  };
+
   const deleteLog = async (logId: number) => {
     if (!window.confirm(tr("确定删除这条日志？", "Delete this log entry?"))) return;
     try {
@@ -380,7 +401,7 @@ export default function Home() {
         </div>
       </header>
 
-      <nav className="nav-tabs" aria-label="主要功能">
+      <nav className="nav-tabs" aria-label={tr("主要功能", "Primary navigation")}>
         {([
           ["overview", tr("库存", "Inventory"), ""],
           ["sale", tr("销售下单", "New order"), ""],
@@ -449,19 +470,36 @@ export default function Home() {
                         <td className="stock-number pending-number">{item.pending}</td>
                         <td className="stock-number">{item.available}</td>
                         <td>
-                          <select
-                            className={`status-select ${statusClass(item.status)}`}
-                            aria-label={`${item.sku} ${tr("状态", "status")}`}
-                            value={item.status}
-                            disabled={busy}
-                            onChange={(event) => changeStatus(item.sku, event.target.value)}
-                          >
-                            <option value="充足">{tr("充足", "Sufficient")}</option>
-                            <option value="积压">{tr("积压", "Overstock")}</option>
-                            <option value="低库存">{tr("低库存", "Low stock")}</option>
-                          </select>
+                          {data.admin ? (
+                            <select
+                              className={`status-select ${statusClass(item.status)}`}
+                              aria-label={`${item.sku} ${tr("状态", "status")}`}
+                              value={item.status}
+                              disabled={busy}
+                              onChange={(event) => changeStatus(item.sku, event.target.value)}
+                            >
+                              <option value="充足">{tr("充足", "Sufficient")}</option>
+                              <option value="积压">{tr("积压", "Overstock")}</option>
+                              <option value="低库存">{tr("低库存", "Low stock")}</option>
+                            </select>
+                          ) : (
+                            <span className={`status-label ${statusClass(item.status)}`}>
+                              {translateStatus(item.status, lang)}
+                            </span>
+                          )}
                         </td>
-                        {data.admin && <td><button className="delete-mini" disabled={busy} onClick={() => deleteSku(item.sku)}>{tr("删除", "Delete")}</button></td>}
+                        {data.admin && (
+                          <td>
+                            <div className="inventory-actions">
+                              <button className="edit-mini" disabled={busy} onClick={() => setEditingInventory(item)}>
+                                {tr("修改", "Edit")}
+                              </button>
+                              <button className="delete-mini" disabled={busy} onClick={() => deleteSku(item.sku)}>
+                                {tr("删除", "Delete")}
+                              </button>
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -664,6 +702,77 @@ export default function Home() {
           </>
         )}
       </section>
+
+      {editingInventory && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={() => !busy && setEditingInventory(null)}
+        >
+          <form
+            key={editingInventory.sku}
+            className="task-modal inventory-modal"
+            onSubmit={handleInventoryEdit}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="task-modal-header">
+              <div>
+                <h3>{tr("修改库存", "Edit inventory")}</h3>
+                <p>{tr("修改型号、类别、实际库存和状态。", "Update SKU, category, on-hand stock, and status.")}</p>
+              </div>
+              <button
+                type="button"
+                className="modal-close"
+                aria-label={tr("关闭", "Close")}
+                disabled={busy}
+                onClick={() => setEditingInventory(null)}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="task-form-grid">
+              <label>{tr("型号", "SKU")}
+                <input name="sku" defaultValue={editingInventory.sku} required />
+              </label>
+              <label>{tr("类别", "Category")}
+                <select name="category" defaultValue={editingInventory.category} required>
+                  <option value="电池">{tr("电池", "Battery")}</option>
+                  <option value="太阳能板">{tr("太阳能板", "Solar panel")}</option>
+                  <option value="逆变器">{tr("逆变器", "Inverter")}</option>
+                  <option value="安装配件">{tr("安装配件", "Installation accessories")}</option>
+                  <option value="其他">{tr("其他", "Other")}</option>
+                </select>
+              </label>
+              <label>{tr("实际在库", "On hand")}
+                <input name="onHand" type="number" min="0" step="1" defaultValue={editingInventory.on_hand} required />
+              </label>
+              <label>{tr("状态", "Status")}
+                <select name="status" defaultValue={editingInventory.status} required>
+                  <option value="充足">{tr("充足", "Sufficient")}</option>
+                  <option value="积压">{tr("积压", "Overstock")}</option>
+                  <option value="低库存">{tr("低库存", "Low stock")}</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="inventory-derived">
+              <span>{tr("已预留", "Reserved")} <b>{editingInventory.pending}</b></span>
+              <span>{tr("当前可销售", "Currently available")} <b>{editingInventory.available}</b></span>
+              <small>{tr("Pending 和 Available 会根据订单自动计算。", "Pending and Available are calculated automatically from orders.")}</small>
+            </div>
+
+            <div className="modal-actions task-modal-actions">
+              <button type="button" className="secondary" disabled={busy} onClick={() => setEditingInventory(null)}>
+                {tr("取消", "Cancel")}
+              </button>
+              <button className="primary" disabled={busy}>
+                {tr("保存修改", "Save changes")}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {deliveryConfirmGroup && (
         <div
@@ -886,15 +995,18 @@ function translateLog(value: string, lang: Language) {
     "采购": "Purchasing",
     "司机": "Driver",
     "系统": "System",
+    "管理员": "Administrator",
     "销售预留": "Order reserved",
     "安排送货": "Delivery scheduled",
     "确认送达": "Delivered",
     "修改任务": "Task updated",
+    "修改库存": "Inventory updated",
     "新货入库": "Stock received",
     "初始化库存": "Inventory initialised",
     "更改类别": "Category changed",
     "更改状态": "Status changed",
     "删除订单": "Order deleted",
+    "删除型号": "SKU deleted",
   };
   return translations[value] || value;
 }
@@ -906,9 +1018,11 @@ function logActionClass(action: string) {
     "新货入库": "log-arrival",
     "确认送达": "log-delivered",
     "修改任务": "log-dispatch",
+    "修改库存": "log-category",
     "更改类别": "log-category",
     "更改状态": "log-category",
     "删除订单": "log-deleted",
+    "删除型号": "log-deleted",
     "初始化库存": "log-initial",
   };
   return classes[action] || "log-default";
@@ -941,4 +1055,14 @@ function statusClass(status: string) {
   if (status === "积压") return "status-overstock";
   if (status === "低库存") return "status-low";
   return "status-sufficient";
+}
+
+function translateStatus(status: string, lang: Language) {
+  if (lang === "zh") return status;
+  const statuses: Record<string, string> = {
+    "充足": "Sufficient",
+    "积压": "Overstock",
+    "低库存": "Low stock",
+  };
+  return statuses[status] || status;
 }
