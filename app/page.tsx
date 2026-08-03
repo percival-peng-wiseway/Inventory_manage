@@ -41,6 +41,7 @@ type LogEntry = {
 type ApiState = { inventory: InventoryItem[]; orders: Order[]; logs: LogEntry[]; admin: boolean };
 type View = "overview" | "sale" | "dispatch" | "arrival" | "driver" | "log";
 type Language = "zh" | "en";
+type ArrivalMode = "received" | "ordered";
 
 const initialState: ApiState = { inventory: [], orders: [], logs: [], admin: false };
 
@@ -53,6 +54,7 @@ export default function Home() {
   const [message, setMessage] = useState("");
   const [arrivalText, setArrivalText] = useState("");
   const [arrivalDraft, setArrivalDraft] = useState<ParsedArrival[]>([]);
+  const [arrivalMode, setArrivalMode] = useState<ArrivalMode>("received");
   const [lang, setLang] = useState<Language>("en");
   const [orderActor, setOrderActor] = useState("Sam");
   const [saleItems, setSaleItems] = useState<SaleItem[]>([{ sku: "", quantity: 1 }]);
@@ -75,18 +77,29 @@ export default function Home() {
   };
 
   useEffect(() => {
-    refresh()
-      .catch(() => setToast("暂时无法读取库存，请刷新重试"))
-      .finally(() => setLoading(false));
+    let active = true;
+    fetch("/api/inventory", { cache: "no-store" })
+      .then((response) => {
+        if (!response.ok) throw new Error("无法读取库存");
+        return response.json() as Promise<ApiState>;
+      })
+      .then((result) => {
+        if (active) setData(result);
+      })
+      .catch(() => {
+        if (active) setToast("暂时无法读取库存，请刷新重试");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   }, [lang]);
-
-  useEffect(() => {
-    if (!["Sam", "RuiHan", "Hogan", "Kevin"].includes(orderActor)) setOrderActor("Sam");
-  }, [orderActor]);
 
   const notify = (text: string) => {
     setToast(text);
@@ -132,6 +145,8 @@ export default function Home() {
       .filter((item) => categoryFilter === "all" || item.category === categoryFilter)
       .filter((item) => stockFilter === "all" || item.status === stockFilter)
       .sort((a, b) => {
+        const orderingPriority = Number(b.status === "订购中") - Number(a.status === "订购中");
+        if (orderingPriority) return orderingPriority;
         if (sortBy === "available-asc") return a.available - b.available;
         if (sortBy === "available-desc") return b.available - a.available;
         return a.sku.localeCompare(b.sku);
@@ -297,7 +312,7 @@ export default function Home() {
       const quantityMatch = segment.match(/(\d+)\s*(?:个|件|pcs?|units?)?\s*$/i);
       if (!quantityMatch) continue;
       const quantity = Number(quantityMatch[1]);
-      let skuText = segment.slice(0, quantityMatch.index).trim()
+      const skuText = segment.slice(0, quantityMatch.index).trim()
         .replace(/^(?:今天|今日|新货|到货|入库|新增\s*sku|创建\s*sku|new\s*sku|received|receive|new\s*stock|stock)\s*/i, "")
         .replace(/\s*(?:到货|到了|入库|新增|加|有|arrived|received|add)\s*$/i, "")
         .replace(/[xX×:：]\s*$/, "")
@@ -323,13 +338,16 @@ export default function Home() {
 
   const confirmArrival = async () => {
     try {
-      await mutate({ action: "arrival", rawText: arrivalText, items: arrivalDraft });
+      await mutate({ action: "arrival", mode: arrivalMode, rawText: arrivalText, items: arrivalDraft });
       setArrivalText("");
       setArrivalDraft([]);
-      notify(tr("入库已确认，总库存已更新", "Stock received and inventory updated"));
+      setArrivalMode("received");
+      notify(arrivalMode === "ordered"
+        ? tr("订购已确认，商品已置顶并标记为订购中", "Order confirmed and items marked as on order")
+        : tr("入库已确认，总库存已更新", "Stock received and inventory updated"));
       setView("overview");
     } catch (error) {
-      notify(error instanceof Error ? error.message : "入库失败");
+      notify(error instanceof Error ? error.message : tr("操作失败", "Action failed"));
     }
   };
 
@@ -463,6 +481,7 @@ export default function Home() {
                   <option value="充足">{tr("充足", "Sufficient")}</option>
                   <option value="积压">{tr("积压", "Overstock")}</option>
                   <option value="低库存">{tr("低库存", "Low stock")}</option>
+                  <option value="订购中">{tr("订购中", "On order")}</option>
                 </select>
                 <select aria-label={tr("排序", "Sort")} value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
                   <option value="sku">{tr("型号排序", "Sort by SKU")}</option>
@@ -494,6 +513,7 @@ export default function Home() {
                               <option value="充足">{tr("充足", "Sufficient")}</option>
                               <option value="积压">{tr("积压", "Overstock")}</option>
                               <option value="低库存">{tr("低库存", "Low stock")}</option>
+                              <option value="订购中">{tr("订购中", "On order")}</option>
                             </select>
                           ) : (
                             <span className={`status-label ${statusClass(item.status)}`}>
@@ -634,6 +654,29 @@ export default function Home() {
               {arrivalDraft.length > 0 && (
                 <div className="confirm-box">
                   <div className="confirm-title"><h3>{tr("请确认", "Confirm")}</h3><span>{tr("尚未录入", "Not saved")}</span></div>
+                  <fieldset className="arrival-mode">
+                    <legend>{tr("处理方式", "Action")}</legend>
+                    <label className={arrivalMode === "received" ? "selected" : ""}>
+                      <input
+                        type="radio"
+                        name="arrivalMode"
+                        value="received"
+                        checked={arrivalMode === "received"}
+                        onChange={() => setArrivalMode("received")}
+                      />
+                      <span><b>{tr("入库", "Receive")}</b><small>{tr("增加实际库存", "Add to on-hand stock")}</small></span>
+                    </label>
+                    <label className={`ordered ${arrivalMode === "ordered" ? "selected" : ""}`}>
+                      <input
+                        type="radio"
+                        name="arrivalMode"
+                        value="ordered"
+                        checked={arrivalMode === "ordered"}
+                        onChange={() => setArrivalMode("ordered")}
+                      />
+                      <span><b>{tr("订购", "Order")}</b><small>{tr("不增加库存，标记为订购中", "Keep stock unchanged and mark on order")}</small></span>
+                    </label>
+                  </fieldset>
                   {arrivalDraft.map((item) => (
                     <div className="arrival-row" key={item.sku}>
                       <div><b>{item.sku}</b>{item.isNew && <em className="new-sku-badge">{tr("新 SKU", "New SKU")}</em>}</div>
@@ -649,10 +692,12 @@ export default function Home() {
                         <option value="安装配件">{tr("安装配件", "Installation accessories")}</option>
                         <option value="其他">{tr("其他", "Other")}</option>
                       </select>
-                      <span>＋{item.quantity}</span>
+                      <span>{arrivalMode === "ordered" ? "×" : "＋"}{item.quantity}</span>
                     </div>
                   ))}
-                  <button className="primary full" onClick={confirmArrival} disabled={busy}>{tr("确认入库", "Confirm receipt")}</button>
+                  <button className="primary full" onClick={confirmArrival} disabled={busy}>
+                    {arrivalMode === "ordered" ? tr("确认订购", "Confirm order") : tr("确认入库", "Confirm receipt")}
+                  </button>
                 </div>
               )}
             </div>
@@ -770,6 +815,7 @@ export default function Home() {
                   <option value="充足">{tr("充足", "Sufficient")}</option>
                   <option value="积压">{tr("积压", "Overstock")}</option>
                   <option value="低库存">{tr("低库存", "Low stock")}</option>
+                  <option value="订购中">{tr("订购中", "On order")}</option>
                 </select>
               </label>
             </div>
@@ -1021,6 +1067,7 @@ function translateLog(value: string, lang: Language) {
     "修改任务": "Task updated",
     "修改库存": "Inventory updated",
     "新货入库": "Stock received",
+    "提交订购": "Stock ordered",
     "初始化库存": "Inventory initialised",
     "更改类别": "Category changed",
     "更改状态": "Status changed",
@@ -1035,6 +1082,7 @@ function logActionClass(action: string) {
     "销售预留": "log-sale",
     "安排送货": "log-dispatch",
     "新货入库": "log-arrival",
+    "提交订购": "log-ordering",
     "确认送达": "log-delivered",
     "取消送货": "log-deleted",
     "修改任务": "log-dispatch",
@@ -1072,6 +1120,7 @@ function categoryClass(category: string) {
 }
 
 function statusClass(status: string) {
+  if (status === "订购中") return "status-ordering";
   if (status === "积压") return "status-overstock";
   if (status === "低库存") return "status-low";
   return "status-sufficient";
@@ -1083,6 +1132,7 @@ function translateStatus(status: string, lang: Language) {
     "充足": "Sufficient",
     "积压": "Overstock",
     "低库存": "Low stock",
+    "订购中": "On order",
   };
   return statuses[status] || status;
 }

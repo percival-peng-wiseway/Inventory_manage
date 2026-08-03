@@ -139,7 +139,17 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
 .status-sufficient { background: #dff0e4; border-color: #bad8c4; color: #276342; }
 .status-overstock { background: #dfeafb; border-color: #bed0ea; color: #315f9c; }
 .status-low { background: #fff0d4; border-color: #ead1a5; color: #9a5a09; }
+.status-ordering { background: #fde8e6; border-color: #efc1bc; color: #a13d32; }
 .new-sku-badge { display: inline-block; margin-left: 8px; padding: 3px 7px; border-radius: 99px; background: #fff0d4; color: #a55d0a; font-size: 10px; font-style: normal; font-weight: 800; vertical-align: 1px; }
+.arrival-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 14px; padding: 0; border: 0; }
+.arrival-mode legend { grid-column: 1 / -1; margin-bottom: 8px; color: #33453b; font-size: 13px; font-weight: 700; }
+.arrival-mode label { display: flex; grid-template-columns: none; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #fbfcf8; cursor: pointer; }
+.arrival-mode label.selected { border-color: #8bb49a; background: var(--mint); box-shadow: 0 0 0 2px rgba(47,106,80,.08); }
+.arrival-mode label.ordered.selected { border-color: #e3aaa4; background: #fde8e6; box-shadow: 0 0 0 2px rgba(161,61,50,.07); }
+.arrival-mode input { width: 16px; height: 16px; margin: 0; accent-color: var(--forest-2); }
+.arrival-mode .ordered input { accent-color: #a13d32; }
+.arrival-mode span { display: grid; gap: 2px; }
+.arrival-mode small { color: var(--muted); font-weight: 400; }
 .confirm-box button { margin-top: 20px; }
 
 .driver-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
@@ -161,6 +171,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
 .log-sale { background: #fff0d4; color: #9a5a09; }
 .log-dispatch { background: #dfeafb; color: #315f9c; }
 .log-arrival { background: #dcf0ed; color: #23776c; }
+.log-ordering { background: #fde8e6; color: #a13d32; }
 .log-delivered { background: #dff0e4; color: #276342; }
 .log-category { background: #eee4f8; color: #71449a; }
 .log-deleted { background: #fbe3df; color: #a13d32; }
@@ -225,6 +236,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
   .driver-card a { padding: 7px 0; margin-bottom: 8px; }
   .primary, .secondary, .danger { min-height: 44px; }
   .sale-item-row { grid-template-columns: 1fr 90px 38px; }
+  .arrival-mode { grid-template-columns: 1fr; }
   .section-heading { align-items: start; flex-direction: column; }
   .section-heading button { width: 100%; }
   .nav-tabs button { padding: 13px 10px; scroll-snap-align: start; }

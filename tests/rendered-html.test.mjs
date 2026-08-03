@@ -1,91 +1,46 @@
 import assert from "node:assert/strict";
-import { access, readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const developmentPreviewMeta =
-  /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
-const templateRoot = new URL("../", import.meta.url);
-const previewRoot = new URL("../app/_sites-preview/", import.meta.url);
+const pageUrl = new URL("../app/page.tsx", import.meta.url);
+const routeUrl = new URL("../app/api/inventory/route.ts", import.meta.url);
+const cssUrl = new URL("../app/globals.css", import.meta.url);
 
-async function render() {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
+test("receive-stock confirmation supports receipt and ordering", async () => {
+  const page = await readFile(pageUrl, "utf8");
 
-  return worker.fetch(
-    new Request("http://localhost/", {
-      headers: { accept: "text/html" },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
-  );
-}
-
-test("server-renders the starter loading skeleton", async () => {
-  const response = await render();
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-
-  const html = await response.text();
-  assert.match(html, developmentPreviewMeta);
-  assert.match(html, /<title>Your site is taking shape<\/title>/i);
-  assert.match(html, /Building your site/);
-  assert.match(html, /Your site is taking shape/);
-  assert.match(
-    html,
-    /Your first version will appear here automatically when it’s ready\./,
-  );
-  assert.doesNotMatch(html, /Codex/);
-  assert.match(html, /react-loading-skeleton/);
-  assert.match(html, /role="status"/);
+  assert.match(page, /type ArrivalMode = "received" \| "ordered"/);
+  assert.match(page, /action: "arrival", mode: arrivalMode/);
+  assert.match(page, /value="received"/);
+  assert.match(page, /value="ordered"/);
+  assert.match(page, /确认订购/);
+  assert.match(page, /不增加库存，标记为订购中/);
 });
 
-test("keeps the loading skeleton scoped and disposable", async () => {
-  const [preview, css, page, layout, packageJson, files] = await Promise.all([
-    readFile(new URL("SkeletonPreview.tsx", previewRoot), "utf8"),
-    readFile(new URL("preview.css", previewRoot), "utf8"),
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../package.json", import.meta.url), "utf8"),
-    readdir(previewRoot),
+test("on-order stock is pinned and uses the light-red status treatment", async () => {
+  const [page, route, css] = await Promise.all([
+    readFile(pageUrl, "utf8"),
+    readFile(routeUrl, "utf8"),
+    readFile(cssUrl, "utf8"),
   ]);
 
-  assert.deepEqual(files.sort(), ["SkeletonPreview.tsx", "preview.css"]);
-  assert.match(preview, /from "react-loading-skeleton"/);
-  assert.match(preview, /baseColor="#eceae7"/);
-  assert.match(preview, /highlightColor="#f9f8f6"/);
-  assert.match(preview, /duration=\{2\.8\}/);
-  assert.match(preview, /sites-skeleton-search-placeholder/);
-  assert.match(packageJson, /"react-loading-skeleton": "3\.5\.0"/);
+  assert.match(page, /orderingPriority[\s\S]*status === "订购中"/);
+  assert.match(route, /ORDER BY CASE WHEN i\.status = '订购中' THEN 0 ELSE 1 END/);
+  assert.match(page, /if \(status === "订购中"\) return "status-ordering"/);
+  assert.match(css, /\.status-ordering\s*\{[^}]*background:\s*#fde8e6[^}]*border-color:\s*#efc1bc/);
+});
 
-  const shellIndex = preview.indexOf('className="sites-skeleton-shell"');
-  const statusIndex = preview.indexOf('className="sites-skeleton-status"');
-  assert.ok(shellIndex >= 0 && statusIndex > shellIndex);
-  assert.match(css, /position:\s*fixed/);
-  assert.match(css, /inset:\s*0/);
-  assert.match(css, /opacity:\s*0\.52/);
-  assert.match(css, /prefers-reduced-motion:\s*reduce/);
-  assert.doesNotMatch(css, /#020617|canvas|pets|progress/i);
+test("ordering preserves on-hand stock and direct status changes remain admin-only", async () => {
+  const route = await readFile(routeUrl, "utf8");
+
+  assert.match(route, /VALUES \(\?, \?, '订购中', 0, CURRENT_TIMESTAMP\)/);
+  assert.match(route, /ON CONFLICT\(sku\) DO UPDATE SET[\s\S]*status = '订购中'/);
   assert.doesNotMatch(
-    preview,
-    /loading-spinner|status-mark|status-progress|canvas|cookie|random/i,
+    route.match(/const inventoryStatements = mode === "ordered"[\s\S]*?: items\.map/)?.[0] ?? "",
+    /on_hand\s*=\s*on_hand\s*\+/,
   );
 
-  assert.match(page, /export const metadata:\s*Metadata/);
-  assert.match(page, /"codex-preview": "development"/);
-  assert.match(page, /<SkeletonPreview \/>/);
-  assert.match(layout, /title:\s*"Starter Project"/);
-  assert.doesNotMatch(layout, /codex-preview|_sites-preview|themeColor|\bViewport\b/);
-  assert.doesNotMatch(css, /(^|\s)(html|body)\s*\{/m);
-
-  await assert.rejects(
-    access(new URL("public/_sites-preview", templateRoot)),
-  );
+  const setStatusBlock = route.match(/if \(body\.action === "setStatus"\)[\s\S]*?return Response\.json\(\{ ok: true \}\);/)?.[0] ?? "";
+  assert.match(setStatusBlock, /if \(!await isAdminRequest\(request\)\) return error\("需要管理员权限", 403\)/);
+  assert.match(setStatusBlock, /"订购中"/);
 });

@@ -119,7 +119,7 @@ export async function GET(request: Request) {
       FROM inventory i
       LEFT JOIN orders o ON i.sku = o.sku
       GROUP BY i.sku, i.category, i.status, i.on_hand
-      ORDER BY i.rowid
+      ORDER BY CASE WHEN i.status = '订购中' THEN 0 ELSE 1 END, i.rowid
     `).all(),
     database.prepare("SELECT * FROM orders ORDER BY id DESC LIMIT 200").all(),
     database.prepare("SELECT * FROM operations ORDER BY id DESC LIMIT 300").all(),
@@ -163,7 +163,7 @@ export async function POST(request: Request) {
     const onHand = Number(body.onHand);
     if (!originalSku || !sku) return error("型号无效");
     if (!["电池", "太阳能板", "逆变器", "安装配件", "其他"].includes(category)) return error("库存类别无效");
-    if (!["充足", "积压", "低库存"].includes(status)) return error("库存状态无效");
+    if (!["充足", "积压", "低库存", "订购中"].includes(status)) return error("库存状态无效");
     if (!Number.isInteger(onHand) || onHand < 0) return error("实际库存必须是非负整数");
 
     const item = await database.prepare("SELECT sku FROM inventory WHERE sku = ?")
@@ -275,7 +275,7 @@ export async function POST(request: Request) {
     if (!await isAdminRequest(request)) return error("需要管理员权限", 403);
     const sku = String(body.sku || "").trim();
     const status = String(body.status || "");
-    if (!["充足", "积压", "低库存"].includes(status)) return error("库存状态无效");
+    if (!["充足", "积压", "低库存", "订购中"].includes(status)) return error("库存状态无效");
     const item = await database.prepare("SELECT sku FROM inventory WHERE sku = ?").bind(sku).first();
     if (!item) return error("找不到这个型号", 404);
     await database.batch([
@@ -472,12 +472,23 @@ export async function POST(request: Request) {
 
   if (body.action === "arrival") {
     const items = Array.isArray(body.items) ? body.items as Array<{ sku: string; quantity: number; category: string }> : [];
+    const mode = body.mode === "ordered" ? "ordered" : "received";
     if (!items.length) return error("没有可入库的项目");
     for (const item of items) {
       if (!item.sku || !Number.isInteger(item.quantity) || item.quantity < 1 || !["电池", "太阳能板", "逆变器", "安装配件", "其他"].includes(item.category)) return error("入库内容有误");
     }
-    await database.batch([
-      ...items.map((item) =>
+    const inventoryStatements = mode === "ordered"
+      ? items.map((item) =>
+        database.prepare(`
+          INSERT INTO inventory (sku, category, status, on_hand, updated_at)
+          VALUES (?, ?, '订购中', 0, CURRENT_TIMESTAMP)
+          ON CONFLICT(sku) DO UPDATE SET
+            category = excluded.category,
+            status = '订购中',
+            updated_at = CURRENT_TIMESTAMP
+        `).bind(item.sku.trim(), item.category),
+      )
+      : items.map((item) =>
         database.prepare(`
           INSERT INTO inventory (sku, category, on_hand, updated_at)
           VALUES (?, ?, ?, CURRENT_TIMESTAMP)
@@ -486,11 +497,17 @@ export async function POST(request: Request) {
             category = excluded.category,
             updated_at = CURRENT_TIMESTAMP
         `).bind(item.sku.trim(), item.category, item.quantity),
-      ),
+      );
+    await database.batch([
+      ...inventoryStatements,
       database.prepare("INSERT INTO arrivals (raw_text, items_json) VALUES (?, ?)")
-        .bind(String(body.rawText || ""), JSON.stringify(items)),
+        .bind(String(body.rawText || ""), JSON.stringify({ mode, items })),
       database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
-        .bind("采购", "新货入库", items.map((item) => `${item.sku} +${item.quantity}`).join("，")),
+        .bind(
+          "采购",
+          mode === "ordered" ? "提交订购" : "新货入库",
+          items.map((item) => `${item.sku} ${mode === "ordered" ? "×" : "+"}${item.quantity}`).join("，"),
+        ),
     ]);
     return Response.json({ ok: true });
   }
