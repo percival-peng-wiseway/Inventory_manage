@@ -153,6 +153,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
 .driver-date { display: flex; justify-content: space-between; color: var(--forest-2); font-size: 15px; line-height: 1.4; }
 .driver-card h3 { margin: 22px 0 8px; font-size: 23px; }
 .driver-card p { min-height: 48px; color: var(--muted); line-height: 1.5; }
+.driver-note { display: grid; gap: 4px; margin: 2px 0 18px; padding: 11px 13px; border-left: 3px solid #d7a64d; border-radius: 7px; background: #fff6e3; color: #5d4a24; line-height: 1.45; }
+.driver-note b { font-size: 12px; }
+.driver-note span { overflow-wrap: anywhere; }
 .product-lines { margin: 18px 0; border-radius: 9px; overflow: hidden; background: var(--mint); }
 .product-line { display: flex; justify-content: space-between; padding: 12px 15px; border-bottom: 1px solid #c3dcca; }
 .product-line:last-child { border-bottom: 0; }

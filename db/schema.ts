@@ -22,6 +22,7 @@ export const orders = sqliteTable("orders", {
   status: text("status").notNull().default("pending"),
   address: text("address"),
   plannedDate: text("planned_date"),
+  deliveryTime: text("delivery_time"),
   driver: text("driver"),
   driverEmail: text("driver_email"),
   deliveredAt: text("delivered_at"),

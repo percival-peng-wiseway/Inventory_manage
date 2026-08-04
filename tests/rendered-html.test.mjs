@@ -8,6 +8,7 @@ const cssUrl = new URL("../app/globals.css", import.meta.url);
 const smtpUrl = new URL("../app/gmail-smtp.ts", import.meta.url);
 const schemaUrl = new URL("../db/schema.ts", import.meta.url);
 const smtpMigrationUrl = new URL("../drizzle/0005_green_marrow.sql", import.meta.url);
+const deliveryTimeMigrationUrl = new URL("../drizzle/0006_purple_surge.sql", import.meta.url);
 const wranglerUrl = new URL("../wrangler.jsonc", import.meta.url);
 const orderedQuantityMigrationUrl = new URL("../drizzle/0004_grey_gambit.sql", import.meta.url);
 
@@ -20,6 +21,15 @@ test("receive-stock confirmation supports receipt and ordering", async () => {
   assert.match(page, /value="ordered"/);
   assert.match(page, /确认订购/);
   assert.match(page, /加入 Pending，不增加实际库存/);
+});
+
+test("new-order form keeps a stable form reference across the async request", async () => {
+  const page = await readFile(pageUrl, "utf8");
+
+  assert.match(page, /const formElement = event\.currentTarget;/);
+  assert.match(page, /const form = new FormData\(formElement\);/);
+  assert.match(page, /await mutate\([\s\S]*?formElement\.reset\(\);/);
+  assert.doesNotMatch(page, /event\.currentTarget\.reset\(\)/);
 });
 
 test("on-order stock is pinned and uses the light-red status treatment", async () => {
@@ -82,9 +92,9 @@ test("dispatch stores the driver email and sends the preset order email through 
   assert.match(route, /await sendGmailSmtp\(\{/);
   assert.match(route, /cc: \["kevin@e3energy\.com\.au"\]/);
   assert.match(route, /E3 送货提醒 \$\{deliveryDateText\}需要送货/);
-  assert.match(route, /Hello \$\{driver\}，/);
+  assert.match(route, /Hello \$\{details\.driver\}，/);
   assert.match(route, /送货日期：\$\{deliveryDateText\}/);
-  assert.match(route, /客户名字：\$\{firstOrder\.customer\}/);
+  assert.match(route, /客户名字：\$\{details\.customer\}/);
   assert.match(route, /配送物料：/);
   assert.match(route, /系统链接：/);
   assert.match(route, /https:\/\/inventorymanage\.percival-0ae\.workers\.dev\//);
@@ -102,4 +112,43 @@ test("dispatch stores the driver email and sends the preset order email through 
   assert.match(migration, /ALTER TABLE `orders` ADD `driver_email` text/);
   assert.match(wrangler, /"GMAIL_SMTP_USER"/);
   assert.match(wrangler, /"GMAIL_SMTP_APP_PASSWORD"/);
+});
+
+test("task cards show notes and every edit sends a correction email", async () => {
+  const [page, route, css] = await Promise.all([
+    readFile(pageUrl, "utf8"),
+    readFile(routeUrl, "utf8"),
+    readFile(cssUrl, "utf8"),
+  ]);
+
+  assert.match(page, /className="driver-note"/);
+  assert.match(page, /group\.primary\.note \|\| tr\("无", "None"\)/);
+  assert.match(css, /\.driver-note\s*\{/);
+  assert.match(route, /需要送货\$\{details\.correction \? " 修正" : ""\}/);
+  const editTaskBlock = route.match(/if \(body\.action === "editTask"\)[\s\S]*?return Response\.json\(\{ ok: true, emailSent, emailError \}\);/)?.[0] ?? "";
+  assert.match(editTaskBlock, /await sendDeliveryEmail\(\{/);
+  assert.match(editTaskBlock, /correction: true/);
+  assert.match(editTaskBlock, /emailSent \? "邮件通知" : "邮件失败"/);
+  assert.match(page, /const result = await mutate\(\{[\s\S]*?action: "editTask"/);
+  assert.match(page, /修正邮件已发送给司机/);
+});
+
+test("orders persist an estimated delivery time between 9 AM and 5 PM", async () => {
+  const [page, route, schema, migration] = await Promise.all([
+    readFile(pageUrl, "utf8"),
+    readFile(routeUrl, "utf8"),
+    readFile(schemaUrl, "utf8"),
+    readFile(deliveryTimeMigrationUrl, "utf8"),
+  ]);
+
+  assert.match(page, /Array\.from\(\{ length: 9 \}/);
+  assert.match(page, /name="deliveryTime" defaultValue="09:00" required/);
+  assert.match(page, /deliveryTime: form\.get\("deliveryTime"\)/);
+  assert.match(page, /group\.primary\.delivery_time/);
+  assert.match(page, /editingTask\.primary\.delivery_time \|\| "09:00"/);
+  assert.match(route, /\^\(09\|1\[0-7\]\):00\$/);
+  assert.match(route, /INSERT INTO orders \(order_group, sales_rep, customer, phone, address, delivery_time, sku, quantity, note\)/);
+  assert.match(route, /预计送达时间：\$\{formatDeliveryTime\(details\.deliveryTime\)\}/);
+  assert.match(schema, /deliveryTime: text\("delivery_time"\)/);
+  assert.match(migration, /ALTER TABLE `orders` ADD `delivery_time` text/);
 });

@@ -23,6 +23,7 @@ type Order = {
   status: "pending" | "scheduled" | "delivered" | "cancelled";
   address: string | null;
   planned_date: string | null;
+  delivery_time: string | null;
   driver: string | null;
   driver_email: string | null;
   delivered_at: string | null;
@@ -43,6 +44,14 @@ type ApiState = { inventory: InventoryItem[]; orders: Order[]; logs: LogEntry[];
 type View = "overview" | "sale" | "dispatch" | "arrival" | "driver" | "log";
 type Language = "zh" | "en";
 type ArrivalMode = "received" | "ordered";
+
+const DELIVERY_TIME_OPTIONS = Array.from({ length: 9 }, (_, index) => {
+  const hour = index + 9;
+  return {
+    value: `${String(hour).padStart(2, "0")}:00`,
+    label: `${hour > 12 ? hour - 12 : hour}:00 ${hour >= 12 ? "PM" : "AM"}`,
+  };
+});
 
 const initialState: ApiState = { inventory: [], orders: [], logs: [], admin: false };
 
@@ -155,7 +164,8 @@ export default function Home() {
 
   const handleSale = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     if (saleItems.some((item) => !item.sku || item.quantity < 1)) {
       notify(tr("请完整填写所有商品", "Complete every item"));
       return;
@@ -167,10 +177,11 @@ export default function Home() {
         customer: form.get("customer"),
         phone: form.get("phone"),
         address: form.get("address"),
+        deliveryTime: form.get("deliveryTime"),
         items: saleItems,
         note: form.get("note"),
       });
-      event.currentTarget.reset();
+      formElement.reset();
       setSaleItems([{ sku: "", quantity: 1 }]);
       notify(tr("销售单已提交，库存已转为 Pending", "Order submitted and inventory reserved"));
       setView("overview");
@@ -388,13 +399,14 @@ export default function Home() {
     }
     const form = new FormData(event.currentTarget);
     try {
-      await mutate({
+      const result = await mutate({
         action: "editTask",
         orderIds: editingTask.orders.map((order) => order.id),
         customer: form.get("customer"),
         phone: form.get("phone"),
         address: form.get("address"),
         plannedDate: form.get("plannedDate"),
+        deliveryTime: form.get("deliveryTime"),
         driver: form.get("driver"),
         driverEmail: form.get("driverEmail"),
         salesRep: form.get("salesRep"),
@@ -403,7 +415,12 @@ export default function Home() {
       });
       setEditingTask(null);
       setTaskEditItems([]);
-      notify(tr("任务内容已更新", "Task updated"));
+      notify(result.emailSent
+        ? tr("任务已更新，修正邮件已发送给司机", "Task updated and correction email sent to the driver")
+        : tr(
+          `任务已更新，但修正邮件未发送：${result.emailError || "未知错误"}`,
+          `Task updated, but the correction email was not sent: ${result.emailError || "Unknown error"}`,
+        ));
     } catch (error) {
       notify(error instanceof Error ? error.message : tr("修改失败", "Update failed"));
     }
@@ -559,6 +576,11 @@ export default function Home() {
               <label>{tr("电话", "Phone")}<input name="phone" placeholder="04xx xxx xxx" /></label>
               <label>{tr("送货地址", "Delivery address")}<input name="address" placeholder={tr("完整送货地址", "Full delivery address")} required /></label>
               <label>{tr("备注", "Note")}<input name="note" placeholder={tr("选填", "Optional")} /></label>
+              <label>{tr("预计送达时间", "Estimated delivery time")}
+                <select name="deliveryTime" defaultValue="09:00" required>
+                  {DELIVERY_TIME_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
               <div className="sale-items">
                 <div className="sale-items-heading">
                   <h3>{tr("商品", "Items")}</h3>
@@ -709,11 +731,21 @@ export default function Home() {
             {driverGroups.length === 0 ? <Empty text={tr("没有待送任务", "No deliveries")} sub={tr("新任务会显示在这里。", "New tasks will appear here.")} /> :
               <div className="driver-grid">{driverGroups.map((group) => (
                 <article className="driver-card" key={group.key}>
-                  <div className="driver-date"><span>{tr("送货日期", "Delivery date")}</span><strong>{group.primary.planned_date || tr("待定", "TBC")}</strong></div>
+                  <div className="driver-date">
+                    <span>{tr("送货日期", "Delivery date")}</span>
+                    <strong>
+                      {group.primary.planned_date || tr("待定", "TBC")}
+                      {group.primary.delivery_time ? ` · ${formatDeliveryTime(group.primary.delivery_time)}` : ""}
+                    </strong>
+                  </div>
                   <h3>{group.primary.customer}</h3>
                   <p>{group.primary.address}</p>
                   {group.primary.phone && <a href={`tel:${group.primary.phone}`}>{group.primary.phone}</a>}
                   {group.primary.driver_email && <a href={`mailto:${group.primary.driver_email}`}>{group.primary.driver_email}</a>}
+                  <div className="driver-note">
+                    <b>{tr("备注", "Note")}</b>
+                    <span>{group.primary.note || tr("无", "None")}</span>
+                  </div>
                   <div className="product-lines">
                     {group.orders.map((order) => <div className="product-line" key={order.id}><b>{order.sku}</b><strong>× {order.quantity}</strong></div>)}
                   </div>
@@ -913,6 +945,11 @@ export default function Home() {
               <label>{tr("送货日期", "Delivery date")}
                 <input name="plannedDate" type="date" defaultValue={editingTask.primary.planned_date || ""} required />
               </label>
+              <label>{tr("预计送达时间", "Estimated delivery time")}
+                <select name="deliveryTime" defaultValue={editingTask.primary.delivery_time || "09:00"} required>
+                  {DELIVERY_TIME_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
               <label>{tr("司机", "Driver")}
                 <input name="driver" defaultValue={editingTask.primary.driver || "陈师傅"} required />
               </label>
@@ -1045,6 +1082,10 @@ function groupOrderRows(orders: Order[]): OrderGroup[] {
 
 function formatDate(value: string, lang: Language) {
   return new Date(value).toLocaleDateString(lang === "zh" ? "zh-CN" : "en-AU", { month: "short", day: "numeric" });
+}
+
+function formatDeliveryTime(value: string) {
+  return DELIVERY_TIME_OPTIONS.find((option) => option.value === value)?.label || value;
 }
 
 function formatDateTime(value: string, lang: Language) {

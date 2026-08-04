@@ -21,6 +21,7 @@ type OrderActionRow = {
   note: string | null;
   address: string | null;
   planned_date: string | null;
+  delivery_time: string | null;
   driver: string | null;
   driver_email: string | null;
 };
@@ -45,6 +46,70 @@ function formatChineseDeliveryDate(value: string) {
   const match = value.match(/^\d{4}-(\d{2})-(\d{2})$/);
   if (!match) return value;
   return `${Number(match[1])}月${Number(match[2])}日`;
+}
+
+function isDeliveryTime(value: string) {
+  return /^(09|1[0-7]):00$/.test(value);
+}
+
+function formatDeliveryTime(value: string) {
+  if (!isDeliveryTime(value)) return "未提供";
+  const hour = Number(value.slice(0, 2));
+  return `${hour > 12 ? hour - 12 : hour}:00 ${hour >= 12 ? "PM" : "AM"}`;
+}
+
+type DeliveryEmailDetails = {
+  driver: string;
+  driverEmail: string;
+  plannedDate: string;
+  deliveryTime: string;
+  customer: string;
+  phone: string;
+  address: string;
+  note: string;
+  items: Array<{ sku: string; quantity: number }>;
+  correction?: boolean;
+};
+
+async function sendDeliveryEmail(details: DeliveryEmailDetails) {
+  const deliveryDateText = formatChineseDeliveryDate(details.plannedDate);
+  const subject = `E3 送货提醒 ${deliveryDateText}需要送货${details.correction ? " 修正" : ""}`;
+  const text = [
+    `Hello ${details.driver}，`,
+    "",
+    `送货日期：${deliveryDateText}`,
+    `预计送达时间：${formatDeliveryTime(details.deliveryTime)}`,
+    `客户名字：${details.customer}`,
+    `客户电话：${details.phone || "未提供"}`,
+    `送货地址：${details.address}`,
+    `备注：${details.note || "无"}`,
+    "---------------------",
+    "配送物料：",
+    ...details.items.map((item) => `${item.sku} × ${item.quantity}`),
+    "",
+    "系统链接：",
+    "https://inventorymanage.percival-0ae.workers.dev/",
+  ].join("\n");
+  const smtp = gmailSmtpSettings();
+  if (!smtp.username || !smtp.appPassword) {
+    return { emailSent: false, emailError: "Gmail SMTP 尚未配置" };
+  }
+  try {
+    await sendGmailSmtp({
+      username: smtp.username,
+      appPassword: smtp.appPassword,
+      to: details.driverEmail,
+      cc: ["kevin@e3energy.com.au"],
+      subject,
+      text,
+    });
+    return { emailSent: true, emailError: "" };
+  } catch (smtpError) {
+    return {
+      emailSent: false,
+      emailError: smtpError instanceof Error ? smtpError.message : "Gmail SMTP 发送失败",
+    };
+  }
 }
 
 let databaseReady: Promise<void> | undefined;
@@ -82,6 +147,7 @@ async function initializeDatabase() {
       status TEXT NOT NULL DEFAULT 'pending',
       address TEXT,
       planned_date TEXT,
+      delivery_time TEXT,
       driver TEXT,
       driver_email TEXT,
       delivered_at TEXT,
@@ -145,6 +211,9 @@ async function initializeDatabase() {
   }
   if (!orderColumns.results.some((column) => column.name === "driver_email")) {
     await database.prepare("ALTER TABLE orders ADD COLUMN driver_email TEXT").run();
+  }
+  if (!orderColumns.results.some((column) => column.name === "delivery_time")) {
+    await database.prepare("ALTER TABLE orders ADD COLUMN delivery_time TEXT").run();
   }
   await database.prepare(`
     UPDATE inventory
@@ -320,14 +389,16 @@ export async function POST(request: Request) {
     const salesRep = String(body.salesRep || "");
     const customer = String(body.customer || "");
     const address = String(body.address || "").trim();
+    const deliveryTime = String(body.deliveryTime || "").trim();
     if (!address) return error("请填写送货地址");
+    if (!isDeliveryTime(deliveryTime)) return error("请选择 9:00 AM 至 5:00 PM 的预计送达时间");
     const orderGroup = crypto.randomUUID();
     await database.batch([
       ...items.map((item) =>
         database.prepare(`
-          INSERT INTO orders (order_group, sales_rep, customer, phone, address, sku, quantity, note)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).bind(orderGroup, salesRep, customer, String(body.phone || ""), address, item.sku, item.quantity, String(body.note || "")),
+          INSERT INTO orders (order_group, sales_rep, customer, phone, address, delivery_time, sku, quantity, note)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(orderGroup, salesRep, customer, String(body.phone || ""), address, deliveryTime, item.sku, item.quantity, String(body.note || "")),
       ),
       database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
         .bind(salesRep, "销售预留", `${customer} · ${items.map((item) => `${item.sku} × ${item.quantity}`).join("，")}`),
@@ -432,43 +503,17 @@ export async function POST(request: Request) {
       database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
         .bind("采购", "安排送货", `${firstOrder.customer} · ${itemText} · ${plannedDate}`),
     ]);
-    const deliveryDateText = formatChineseDeliveryDate(plannedDate);
-    const emailSubject = `E3 送货提醒 ${deliveryDateText}需要送货`;
-    const emailBody = [
-      `Hello ${driver}，`,
-      "",
-      `送货日期：${deliveryDateText}`,
-      `客户名字：${firstOrder.customer}`,
-      `客户电话：${firstOrder.phone || "未提供"}`,
-      `送货地址：${address}`,
-      `备注：${firstOrder.note || "无"}`,
-      "---------------------",
-      "配送物料：",
-      ...orderRows.results.map((order) => `${order.sku} × ${order.quantity}`),
-      "",
-      "系统链接：",
-      "https://inventorymanage.percival-0ae.workers.dev/",
-    ].join("\n");
-    const smtp = gmailSmtpSettings();
-    let emailSent = false;
-    let emailError = "";
-    if (!smtp.username || !smtp.appPassword) {
-      emailError = "Gmail SMTP 尚未配置";
-    } else {
-      try {
-        await sendGmailSmtp({
-          username: smtp.username,
-          appPassword: smtp.appPassword,
-          to: driverEmail,
-          cc: ["kevin@e3energy.com.au"],
-          subject: emailSubject,
-          text: emailBody,
-        });
-        emailSent = true;
-      } catch (smtpError) {
-        emailError = smtpError instanceof Error ? smtpError.message : "Gmail SMTP 发送失败";
-      }
-    }
+    const { emailSent, emailError } = await sendDeliveryEmail({
+      driver,
+      driverEmail,
+      plannedDate,
+      deliveryTime: firstOrder.delivery_time || "",
+      customer: firstOrder.customer,
+      phone: firstOrder.phone || "",
+      address,
+      note: firstOrder.note || "",
+      items: orderRows.results,
+    });
     await database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
       .bind("采购", emailSent ? "邮件通知" : "邮件失败", `${driver} · ${driverEmail} · ${firstOrder.customer}${emailError ? ` · ${emailError}` : ""}`)
       .run();
@@ -520,11 +565,13 @@ export async function POST(request: Request) {
     const phone = String(body.phone || "").trim();
     const address = String(body.address || "").trim();
     const plannedDate = String(body.plannedDate || "").trim();
+    const deliveryTime = String(body.deliveryTime || "").trim();
     const driver = String(body.driver || "").trim();
     const driverEmail = String(body.driverEmail || "").trim();
     const salesRep = String(body.salesRep || "").trim();
     const note = String(body.note || "").trim();
     if (!customer || !address || !plannedDate || !driver || !driverEmail || !salesRep) return error("请完整填写任务内容");
+    if (!isDeliveryTime(deliveryTime)) return error("请选择 9:00 AM 至 5:00 PM 的预计送达时间");
     if (!isEmailAddress(driverEmail)) return error("请输入有效的司机邮箱");
 
     const orderGroup = firstOrder.order_group || crypto.randomUUID();
@@ -535,9 +582,9 @@ export async function POST(request: Request) {
         database.prepare(`
           INSERT INTO orders (
             order_group, sales_rep, customer, phone, sku, quantity, created_at,
-            status, address, planned_date, driver, driver_email, note
+            status, address, planned_date, delivery_time, driver, driver_email, note
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?, ?)
         `).bind(
           orderGroup,
           salesRep,
@@ -548,6 +595,7 @@ export async function POST(request: Request) {
           firstOrder.created_at,
           address,
           plannedDate,
+          deliveryTime,
           driver,
           driverEmail,
           note,
@@ -556,7 +604,26 @@ export async function POST(request: Request) {
       database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
         .bind("采购", "修改任务", `${customer} · ${itemText} · ${plannedDate}`),
     ]);
-    return Response.json({ ok: true });
+    const { emailSent, emailError } = await sendDeliveryEmail({
+      driver,
+      driverEmail,
+      plannedDate,
+      deliveryTime,
+      customer,
+      phone,
+      address,
+      note,
+      items,
+      correction: true,
+    });
+    await database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
+      .bind(
+        "采购",
+        emailSent ? "邮件通知" : "邮件失败",
+        `${driver} · ${driverEmail} · ${customer} · 修正${emailError ? ` · ${emailError}` : ""}`,
+      )
+      .run();
+    return Response.json({ ok: true, emailSent, emailError });
   }
 
   if (body.action === "deliver") {
