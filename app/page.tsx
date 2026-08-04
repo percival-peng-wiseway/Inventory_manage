@@ -674,7 +674,7 @@ export default function Home() {
                         checked={arrivalMode === "ordered"}
                         onChange={() => setArrivalMode("ordered")}
                       />
-                      <span><b>{tr("订购", "Order")}</b><small>{tr("不增加库存，标记为订购中", "Keep stock unchanged and mark on order")}</small></span>
+                      <span><b>{tr("订购", "Order")}</b><small>{tr("加入 Pending，不增加实际库存", "Add to Pending without changing on-hand stock")}</small></span>
                     </label>
                   </fieldset>
                   {arrivalDraft.map((item) => (

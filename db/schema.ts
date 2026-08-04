@@ -6,6 +6,7 @@ export const inventory = sqliteTable("inventory", {
   category: text("category").notNull(),
   status: text("status").notNull().default("充足"),
   onHand: integer("on_hand").notNull().default(0),
+  orderedQuantity: integer("ordered_quantity").notNull().default(0),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 

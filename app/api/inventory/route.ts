@@ -49,6 +49,7 @@ async function initializeDatabase() {
       category TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT '充足',
       on_hand INTEGER NOT NULL DEFAULT 0,
+      ordered_quantity INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
     database.prepare(`CREATE TABLE IF NOT EXISTS orders (
@@ -86,6 +87,39 @@ async function initializeDatabase() {
   if (!inventoryColumns.results.some((column) => column.name === "status")) {
     await database.prepare("ALTER TABLE inventory ADD COLUMN status TEXT NOT NULL DEFAULT '充足'").run();
   }
+  if (!inventoryColumns.results.some((column) => column.name === "ordered_quantity")) {
+    await database.prepare("ALTER TABLE inventory ADD COLUMN ordered_quantity INTEGER NOT NULL DEFAULT 0").run();
+    const arrivalRows = await database.prepare("SELECT items_json FROM arrivals ORDER BY id")
+      .all<{ items_json: string }>();
+    const orderedBySku = new Map<string, number>();
+    for (const row of arrivalRows.results) {
+      try {
+        const parsed = JSON.parse(row.items_json) as
+          | Array<{ sku?: unknown; quantity?: unknown }>
+          | { mode?: unknown; items?: unknown };
+        const mode = !Array.isArray(parsed) && parsed.mode === "ordered" ? "ordered" : "received";
+        const items = Array.isArray(parsed) ? parsed : Array.isArray(parsed.items) ? parsed.items : [];
+        for (const rawItem of items) {
+          if (!rawItem || typeof rawItem !== "object") continue;
+          const item = rawItem as { sku?: unknown; quantity?: unknown };
+          const sku = String(item.sku || "").trim();
+          const quantity = Number(item.quantity);
+          if (!sku || !Number.isInteger(quantity) || quantity < 1) continue;
+          const current = orderedBySku.get(sku) || 0;
+          orderedBySku.set(sku, mode === "ordered" ? current + quantity : Math.max(0, current - quantity));
+        }
+      } catch {
+        // Keep malformed legacy arrival records from blocking database startup.
+      }
+    }
+    const backfillStatements = [...orderedBySku.entries()]
+      .filter(([, quantity]) => quantity > 0)
+      .map(([sku, quantity]) =>
+        database.prepare("UPDATE inventory SET ordered_quantity = ? WHERE sku = ? AND status = '订购中'")
+          .bind(quantity, sku),
+      );
+    if (backfillStatements.length) await database.batch(backfillStatements);
+  }
   const orderColumns = await database.prepare("PRAGMA table_info(orders)").all<{ name: string }>();
   if (!orderColumns.results.some((column) => column.name === "order_group")) {
     await database.prepare("ALTER TABLE orders ADD COLUMN order_group TEXT").run();
@@ -114,11 +148,11 @@ export async function GET(request: Request) {
         i.category,
         i.status,
         i.on_hand,
-        COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS pending,
+        i.ordered_quantity + COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS pending,
         i.on_hand - COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS available
       FROM inventory i
       LEFT JOIN orders o ON i.sku = o.sku
-      GROUP BY i.sku, i.category, i.status, i.on_hand
+      GROUP BY i.sku, i.category, i.status, i.on_hand, i.ordered_quantity
       ORDER BY CASE WHEN i.status = '订购中' THEN 0 ELSE 1 END, i.rowid
     `).all(),
     database.prepare("SELECT * FROM orders ORDER BY id DESC LIMIT 200").all(),
@@ -480,20 +514,22 @@ export async function POST(request: Request) {
     const inventoryStatements = mode === "ordered"
       ? items.map((item) =>
         database.prepare(`
-          INSERT INTO inventory (sku, category, status, on_hand, updated_at)
-          VALUES (?, ?, '订购中', 0, CURRENT_TIMESTAMP)
+          INSERT INTO inventory (sku, category, status, on_hand, ordered_quantity, updated_at)
+          VALUES (?, ?, '订购中', 0, ?, CURRENT_TIMESTAMP)
           ON CONFLICT(sku) DO UPDATE SET
             category = excluded.category,
             status = '订购中',
+            ordered_quantity = ordered_quantity + excluded.ordered_quantity,
             updated_at = CURRENT_TIMESTAMP
-        `).bind(item.sku.trim(), item.category),
+        `).bind(item.sku.trim(), item.category, item.quantity),
       )
       : items.map((item) =>
         database.prepare(`
-          INSERT INTO inventory (sku, category, on_hand, updated_at)
-          VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+          INSERT INTO inventory (sku, category, on_hand, ordered_quantity, updated_at)
+          VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP)
           ON CONFLICT(sku) DO UPDATE SET
             on_hand = on_hand + excluded.on_hand,
+            ordered_quantity = MAX(0, ordered_quantity - excluded.on_hand),
             category = excluded.category,
             updated_at = CURRENT_TIMESTAMP
         `).bind(item.sku.trim(), item.category, item.quantity),
