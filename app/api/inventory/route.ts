@@ -445,6 +445,9 @@ export async function POST(request: Request) {
       "---------------------",
       "配送物料：",
       ...orderRows.results.map((order) => `${order.sku} × ${order.quantity}`),
+      "",
+      "系统链接：",
+      "https://inventorymanage.percival-0ae.workers.dev/",
     ].join("\n");
     const smtp = gmailSmtpSettings();
     let emailSent = false;

@@ -86,6 +86,8 @@ test("dispatch stores the driver email and sends the preset order email through 
   assert.match(route, /送货日期：\$\{deliveryDateText\}/);
   assert.match(route, /客户名字：\$\{firstOrder\.customer\}/);
   assert.match(route, /配送物料：/);
+  assert.match(route, /系统链接：/);
+  assert.match(route, /https:\/\/inventorymanage\.percival-0ae\.workers\.dev\//);
   assert.match(page, /name="driver" defaultValue="陈师傅"/);
   assert.match(page, /name="driverEmail" type="email" autoComplete="email" defaultValue="cyp81183456@gmail\.com"/);
   assert.match(route, /body\.driver \|\| "陈师傅"/);
