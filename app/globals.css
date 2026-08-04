@@ -122,10 +122,6 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
 .edit-mini { border: 1px solid #bad8c4; border-radius: 7px; padding: 6px 9px; background: var(--mint); color: var(--forest); font-size: 11px; font-weight: 800; white-space: nowrap; }
 .edit-mini:hover { background: #cee3d5; }
 .edit-mini:disabled { opacity: .45; cursor: not-allowed; }
-.message-box { margin-top: 22px; display: grid; grid-template-columns: 180px 1fr auto; gap: 20px; align-items: center; background: var(--forest); color: white; border-radius: 16px; padding: 22px; }
-.message-box .eyebrow { color: #a9d2bc; }
-.message-box pre { white-space: pre-wrap; margin: 0; padding: 15px; background: rgba(255,255,255,.08); border-radius: 9px; font: 13px/1.7 var(--font-geist-mono); }
-.message-box .primary { background: white; color: var(--forest); }
 
 .textarea-label textarea { min-height: 150px; resize: vertical; margin-bottom: 8px; }
 .example { margin-top: 28px; padding: 18px; background: #ece9db; border-left: 4px solid var(--amber); line-height: 1.7; }
@@ -210,7 +206,6 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
   .order-card { grid-template-columns: 1fr; }
   .order-summary { border-right: 0; border-bottom: 1px solid var(--line); padding-bottom: 18px; }
   .driver-grid { grid-template-columns: 1fr 1fr; }
-  .message-box { grid-template-columns: 1fr; }
   .filter-bar { grid-template-columns: 1fr 1fr; }
 }
 

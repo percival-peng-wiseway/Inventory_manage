@@ -75,9 +75,12 @@ test("dispatch stores the driver email and sends the preset order email through 
   assert.match(page, /name="driverEmail" type="email"/);
   assert.match(page, /driverEmail: form\.get\("driverEmail"\)/);
   assert.match(page, /result\.emailSent/);
+  assert.doesNotMatch(page, /className="message-box"/);
+  assert.doesNotMatch(page, /copyMessage/);
   assert.match(route, /if \(!isEmailAddress\(driverEmail\)\) return error\("请输入有效的司机邮箱"\)/);
   assert.match(route, /driver_email = \?/);
   assert.match(route, /await sendGmailSmtp\(\{/);
+  assert.match(route, /cc: \["kevin@e3energy\.com\.au"\]/);
   assert.match(route, /E3 送货提醒 \$\{deliveryDateText\}需要送货/);
   assert.match(route, /Hello \$\{driver\}，/);
   assert.match(route, /送货日期：\$\{deliveryDateText\}/);
@@ -87,11 +90,12 @@ test("dispatch stores the driver email and sends the preset order email through 
   assert.match(page, /name="driverEmail" type="email" autoComplete="email" defaultValue="cyp81183456@gmail\.com"/);
   assert.match(route, /body\.driver \|\| "陈师傅"/);
   assert.match(route, /body\.driverEmail \|\| "cyp81183456@gmail\.com"/);
-  assert.match(route, /return Response\.json\(\{ ok: true, message, emailSent, emailError \}\)/);
+  assert.match(route, /return Response\.json\(\{ ok: true, emailSent, emailError \}\)/);
   assert.match(smtp, /from "cloudflare:sockets"/);
   assert.match(smtp, /port: SMTP_PORT/);
   assert.match(smtp, /secureTransport: "on"/);
   assert.match(smtp, /AUTH LOGIN/);
+  assert.match(smtp, /Cc: \$\{cc\.map/);
   assert.match(schema, /driverEmail: text\("driver_email"\)/);
   assert.match(migration, /ALTER TABLE `orders` ADD `driver_email` text/);
   assert.match(wrangler, /"GMAIL_SMTP_USER"/);

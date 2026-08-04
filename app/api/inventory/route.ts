@@ -432,22 +432,6 @@ export async function POST(request: Request) {
       database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
         .bind("采购", "安排送货", `${firstOrder.customer} · ${itemText} · ${plannedDate}`),
     ]);
-    const message = body.language === "en"
-      ? [
-        `Contact: ${firstOrder.customer}`,
-        `Phone: ${firstOrder.phone || "Not provided"}`,
-        `Items: ${orderRows.results.map((order) => `${order.sku} × ${order.quantity}`).join(", ")}`,
-        `Note: ${firstOrder.note || "-"}`,
-        `Address: ${address}`,
-      ].join("\n")
-      : [
-        `联系人：${firstOrder.customer}`,
-        `电话：${firstOrder.phone || "未提供"}`,
-        `货物：${itemText}`,
-        `备注：${firstOrder.note || "-"}`,
-        `地址：${address}`,
-      ].join("\n");
-
     const deliveryDateText = formatChineseDeliveryDate(plannedDate);
     const emailSubject = `E3 送货提醒 ${deliveryDateText}需要送货`;
     const emailBody = [
@@ -473,6 +457,7 @@ export async function POST(request: Request) {
           username: smtp.username,
           appPassword: smtp.appPassword,
           to: driverEmail,
+          cc: ["kevin@e3energy.com.au"],
           subject: emailSubject,
           text: emailBody,
         });
@@ -484,7 +469,7 @@ export async function POST(request: Request) {
     await database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
       .bind("采购", emailSent ? "邮件通知" : "邮件失败", `${driver} · ${driverEmail} · ${firstOrder.customer}${emailError ? ` · ${emailError}` : ""}`)
       .run();
-    return Response.json({ ok: true, message, emailSent, emailError });
+    return Response.json({ ok: true, emailSent, emailError });
   }
 
   if (body.action === "editTask") {

@@ -52,7 +52,6 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
-  const [message, setMessage] = useState("");
   const [arrivalText, setArrivalText] = useState("");
   const [arrivalDraft, setArrivalDraft] = useState<ParsedArrival[]>([]);
   const [arrivalMode, setArrivalMode] = useState<ArrivalMode>("received");
@@ -191,9 +190,7 @@ export default function Home() {
         plannedDate: form.get("plannedDate"),
         driver: form.get("driver"),
         driverEmail: form.get("driverEmail"),
-        language: lang,
       });
-      setMessage(result.message);
       notify(result.emailSent
         ? tr("送货已安排，邮件已发送给司机", "Delivery scheduled and email sent to the driver")
         : tr(
@@ -361,11 +358,6 @@ export default function Home() {
     } catch (error) {
       notify(error instanceof Error ? error.message : tr("操作失败", "Action failed"));
     }
-  };
-
-  const copyMessage = async () => {
-    await navigator.clipboard.writeText(message);
-    notify(tr("司机消息已复制", "Driver message copied"));
   };
 
   const confirmDelivery = async () => {
@@ -645,13 +637,6 @@ export default function Home() {
                 </article>
               ))}</div>
             }
-            {message && (
-              <div className="message-box">
-                <div><h3>{tr("司机消息", "Driver message")}</h3></div>
-                <pre>{message}</pre>
-                <button className="primary" onClick={copyMessage}>{tr("复制", "Copy")}</button>
-              </div>
-            )}
           </>
         )}
 

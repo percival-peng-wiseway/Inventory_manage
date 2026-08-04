@@ -4,6 +4,7 @@ type GmailSmtpOptions = {
   username: string;
   appPassword: string;
   to: string;
+  cc?: string[];
   subject: string;
   text: string;
 };
@@ -20,7 +21,8 @@ export async function sendGmailSmtp(options: GmailSmtpOptions) {
   const username = options.username.trim();
   const appPassword = options.appPassword.replace(/\s+/g, "");
   const recipient = options.to.trim();
-  if (!isEmailAddress(username) || !isEmailAddress(recipient)) {
+  const ccRecipients = (options.cc || []).map((address) => address.trim());
+  if (!isEmailAddress(username) || !isEmailAddress(recipient) || ccRecipients.some((address) => !isEmailAddress(address))) {
     throw new Error("Invalid SMTP email address");
   }
   if (!appPassword) throw new Error("Missing Gmail app password");
@@ -71,9 +73,12 @@ export async function sendGmailSmtp(options: GmailSmtpOptions) {
     await command(toBase64(appPassword), [235]);
     await command(`MAIL FROM:<${username}>`, [250]);
     await command(`RCPT TO:<${recipient}>`, [250, 251]);
+    for (const ccRecipient of ccRecipients) {
+      if (ccRecipient !== recipient) await command(`RCPT TO:<${ccRecipient}>`, [250, 251]);
+    }
     await command("DATA", [354]);
 
-    const message = createMimeMessage(username, recipient, options.subject, options.text);
+    const message = createMimeMessage(username, recipient, ccRecipients, options.subject, options.text);
     await command(`${message.replace(/^\./gm, "..")}\r\n.`, [250]);
     await command("QUIT", [221]);
   } finally {
@@ -95,11 +100,12 @@ export async function sendGmailSmtp(options: GmailSmtpOptions) {
   }
 }
 
-function createMimeMessage(from: string, to: string, subject: string, body: string) {
+function createMimeMessage(from: string, to: string, cc: string[], subject: string, body: string) {
   const safeSubject = subject.replace(/[\r\n]+/g, " ").trim();
   return [
     `From: Inventory Management <${from}>`,
     `To: <${to}>`,
+    ...(cc.length ? [`Cc: ${cc.map((address) => `<${address}>`).join(", ")}`] : []),
     `Subject: =?UTF-8?B?${toBase64(safeSubject)}?=`,
     `Date: ${new Date().toUTCString()}`,
     "MIME-Version: 1.0",
