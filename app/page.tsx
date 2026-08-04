@@ -24,6 +24,7 @@ type Order = {
   address: string | null;
   planned_date: string | null;
   driver: string | null;
+  driver_email: string | null;
   delivered_at: string | null;
   note: string | null;
 };
@@ -189,10 +190,16 @@ export default function Home() {
         address: form.get("address"),
         plannedDate: form.get("plannedDate"),
         driver: form.get("driver"),
+        driverEmail: form.get("driverEmail"),
         language: lang,
       });
       setMessage(result.message);
-      notify(tr("送货已安排，司机消息已生成", "Delivery scheduled and driver message created"));
+      notify(result.emailSent
+        ? tr("送货已安排，邮件已发送给司机", "Delivery scheduled and email sent to the driver")
+        : tr(
+          `送货已安排，但邮件未发送：${result.emailError || "未知错误"}`,
+          `Delivery scheduled, but the email was not sent: ${result.emailError || "Unknown error"}`,
+        ));
     } catch (error) {
       notify(error instanceof Error ? error.message : "安排失败");
     }
@@ -223,8 +230,13 @@ export default function Home() {
 
   const changeStatus = async (sku: string, status: string) => {
     try {
-      await mutate({ action: "setStatus", sku, status });
-      notify(tr("库存状态已更新", "Status updated"));
+      const result = await mutate({ action: "setStatus", sku, status });
+      notify(result.receivedQuantity
+        ? tr(
+          `状态已更新，${result.receivedQuantity} 件已从 Pending 转入实际库存`,
+          `Status updated and ${result.receivedQuantity} units moved from Pending to on-hand stock`,
+        )
+        : tr("库存状态已更新", "Status updated"));
     } catch (error) {
       notify(error instanceof Error ? error.message : tr("更新失败", "Update failed"));
     }
@@ -392,6 +404,7 @@ export default function Home() {
         address: form.get("address"),
         plannedDate: form.get("plannedDate"),
         driver: form.get("driver"),
+        driverEmail: form.get("driverEmail"),
         salesRep: form.get("salesRep"),
         note: form.get("note"),
         items: taskEditItems,
@@ -622,9 +635,10 @@ export default function Home() {
                   <form className="dispatch-form" onSubmit={(event) => handleSchedule(event, group)}>
                     <label>{tr("送货地址", "Address")}<input name="address" defaultValue={group.primary.address || ""} placeholder={tr("完整地址", "Full address")} required /></label>
                     <label>{tr("送货日期", "Delivery date")}<input name="plannedDate" type="date" required /></label>
-                    <label>{tr("司机", "Driver")}<select name="driver"><option value="司机">{tr("司机", "Driver")}</option></select></label>
+                    <label>{tr("司机", "Driver")}<input name="driver" defaultValue="陈师傅" required /></label>
+                    <label>{tr("司机邮箱", "Driver email")}<input name="driverEmail" type="email" autoComplete="email" defaultValue="cyp81183456@gmail.com" required /></label>
                     <div className="dispatch-actions">
-                      <button className="primary" disabled={busy}>{tr("安排并生成消息", "Schedule & create message")}</button>
+                      <button className="primary" disabled={busy}>{tr("安排并通知司机", "Schedule & notify driver")}</button>
                       <button type="button" className="danger" disabled={busy} onClick={() => cancelOrder(group)}>{tr("删除", "Delete")}</button>
                     </div>
                   </form>
@@ -714,6 +728,7 @@ export default function Home() {
                   <h3>{group.primary.customer}</h3>
                   <p>{group.primary.address}</p>
                   {group.primary.phone && <a href={`tel:${group.primary.phone}`}>{group.primary.phone}</a>}
+                  {group.primary.driver_email && <a href={`mailto:${group.primary.driver_email}`}>{group.primary.driver_email}</a>}
                   <div className="product-lines">
                     {group.orders.map((order) => <div className="product-line" key={order.id}><b>{order.sku}</b><strong>× {order.quantity}</strong></div>)}
                   </div>
@@ -914,7 +929,10 @@ export default function Home() {
                 <input name="plannedDate" type="date" defaultValue={editingTask.primary.planned_date || ""} required />
               </label>
               <label>{tr("司机", "Driver")}
-                <input name="driver" defaultValue={editingTask.primary.driver || tr("司机", "Driver")} required />
+                <input name="driver" defaultValue={editingTask.primary.driver || "陈师傅"} required />
+              </label>
+              <label>{tr("司机邮箱", "Driver email")}
+                <input name="driverEmail" type="email" autoComplete="email" defaultValue={editingTask.primary.driver_email || "cyp81183456@gmail.com"} required />
               </label>
               <label>{tr("销售", "Sales rep")}
                 <select name="salesRep" defaultValue={editingTask.primary.sales_rep} required>
@@ -1062,6 +1080,8 @@ function translateLog(value: string, lang: Language) {
     "管理员": "Administrator",
     "销售预留": "Order reserved",
     "安排送货": "Delivery scheduled",
+    "邮件通知": "Email sent",
+    "邮件失败": "Email failed",
     "确认送达": "Delivered",
     "取消送货": "Delivery cancelled",
     "修改任务": "Task updated",
@@ -1081,6 +1101,8 @@ function logActionClass(action: string) {
   const classes: Record<string, string> = {
     "销售预留": "log-sale",
     "安排送货": "log-dispatch",
+    "邮件通知": "log-delivered",
+    "邮件失败": "log-deleted",
     "新货入库": "log-arrival",
     "提交订购": "log-ordering",
     "确认送达": "log-delivered",

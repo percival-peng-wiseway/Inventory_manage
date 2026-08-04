@@ -1,10 +1,13 @@
 import { env } from "cloudflare:workers";
+import { isEmailAddress, sendGmailSmtp } from "@/app/gmail-smtp";
 
 const ADMIN_COOKIE = "inventory_admin";
 
 type RuntimeEnv = {
   DB: D1Database;
   ADMIN_PASSWORD?: string;
+  GMAIL_SMTP_USER?: string;
+  GMAIL_SMTP_APP_PASSWORD?: string;
 };
 type OrderActionRow = {
   id: number;
@@ -19,6 +22,7 @@ type OrderActionRow = {
   address: string | null;
   planned_date: string | null;
   driver: string | null;
+  driver_email: string | null;
 };
 
 function db() {
@@ -27,6 +31,20 @@ function db() {
 
 function adminPassword() {
   return String((env as unknown as RuntimeEnv).ADMIN_PASSWORD || "");
+}
+
+function gmailSmtpSettings() {
+  const runtimeEnv = env as unknown as RuntimeEnv;
+  return {
+    username: String(runtimeEnv.GMAIL_SMTP_USER || "").trim(),
+    appPassword: String(runtimeEnv.GMAIL_SMTP_APP_PASSWORD || ""),
+  };
+}
+
+function formatChineseDeliveryDate(value: string) {
+  const match = value.match(/^\d{4}-(\d{2})-(\d{2})$/);
+  if (!match) return value;
+  return `${Number(match[1])}月${Number(match[2])}日`;
 }
 
 let databaseReady: Promise<void> | undefined;
@@ -65,6 +83,7 @@ async function initializeDatabase() {
       address TEXT,
       planned_date TEXT,
       driver TEXT,
+      driver_email TEXT,
       delivered_at TEXT,
       note TEXT
     )`),
@@ -124,6 +143,9 @@ async function initializeDatabase() {
   if (!orderColumns.results.some((column) => column.name === "order_group")) {
     await database.prepare("ALTER TABLE orders ADD COLUMN order_group TEXT").run();
   }
+  if (!orderColumns.results.some((column) => column.name === "driver_email")) {
+    await database.prepare("ALTER TABLE orders ADD COLUMN driver_email TEXT").run();
+  }
   await database.prepare(`
     UPDATE inventory
     SET
@@ -134,6 +156,14 @@ async function initializeDatabase() {
       END,
       category = '电池'
     WHERE category IN ('正常库存', '积存库存')
+  `).run();
+  await database.prepare(`
+    UPDATE inventory
+    SET
+      on_hand = on_hand + ordered_quantity,
+      ordered_quantity = 0,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE status <> '订购中' AND ordered_quantity > 0
   `).run();
 
 }
@@ -310,14 +340,29 @@ export async function POST(request: Request) {
     const sku = String(body.sku || "").trim();
     const status = String(body.status || "");
     if (!["充足", "积压", "低库存", "订购中"].includes(status)) return error("库存状态无效");
-    const item = await database.prepare("SELECT sku FROM inventory WHERE sku = ?").bind(sku).first();
+    const item = await database.prepare(`
+      SELECT sku, status, ordered_quantity
+      FROM inventory
+      WHERE sku = ?
+    `).bind(sku).first<{ sku: string; status: string; ordered_quantity: number }>();
     if (!item) return error("找不到这个型号", 404);
+    const receivedQuantity = status !== "订购中"
+      ? item.ordered_quantity
+      : 0;
     await database.batch([
-      database.prepare("UPDATE inventory SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ?").bind(status, sku),
+      database.prepare(`
+        UPDATE inventory
+        SET
+          status = ?,
+          on_hand = on_hand + CASE WHEN ? <> '订购中' THEN ordered_quantity ELSE 0 END,
+          ordered_quantity = CASE WHEN ? <> '订购中' THEN 0 ELSE ordered_quantity END,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE sku = ?
+      `).bind(status, status, status, sku),
       database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
-        .bind("采购", "更改状态", `${sku} → ${status}`),
+        .bind("采购", "更改状态", `${sku} → ${status}${receivedQuantity ? ` · 入库 +${receivedQuantity}` : ""}`),
     ]);
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, receivedQuantity });
   }
 
   if (body.action === "cancelOrder") {
@@ -369,15 +414,20 @@ export async function POST(request: Request) {
       .bind(...orderIds).all<OrderActionRow>();
     if (orderRows.results.length !== orderIds.length) return error("这个销售单已经处理或不存在");
     const firstOrder = orderRows.results[0];
-    const address = String(body.address || "");
-    const plannedDate = String(body.plannedDate || "");
-    const driver = String(body.driver || "司机");
+    const address = String(body.address || "").trim();
+    const plannedDate = String(body.plannedDate || "").trim();
+    const driver = String(body.driver || "陈师傅").trim();
+    const driverEmail = String(body.driverEmail || "cyp81183456@gmail.com").trim();
+    if (!address || !plannedDate || !driver) return error("请完整填写送货安排");
+    if (!isEmailAddress(driverEmail)) return error("请输入有效的司机邮箱");
     const itemText = orderRows.results.map((order) => `${order.sku} × ${order.quantity}`).join("，");
     await database.batch([
       ...orderIds.map((orderId) =>
         database.prepare(`
-          UPDATE orders SET status = 'scheduled', address = ?, planned_date = ?, driver = ? WHERE id = ? AND status = 'pending'
-        `).bind(address, plannedDate, driver, orderId),
+          UPDATE orders
+          SET status = 'scheduled', address = ?, planned_date = ?, driver = ?, driver_email = ?
+          WHERE id = ? AND status = 'pending'
+        `).bind(address, plannedDate, driver, driverEmail, orderId),
       ),
       database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
         .bind("采购", "安排送货", `${firstOrder.customer} · ${itemText} · ${plannedDate}`),
@@ -397,7 +447,44 @@ export async function POST(request: Request) {
         `备注：${firstOrder.note || "-"}`,
         `地址：${address}`,
       ].join("\n");
-    return Response.json({ ok: true, message });
+
+    const deliveryDateText = formatChineseDeliveryDate(plannedDate);
+    const emailSubject = `E3 送货提醒 ${deliveryDateText}需要送货`;
+    const emailBody = [
+      `Hello ${driver}，`,
+      "",
+      `送货日期：${deliveryDateText}`,
+      `客户名字：${firstOrder.customer}`,
+      `客户电话：${firstOrder.phone || "未提供"}`,
+      `送货地址：${address}`,
+      `备注：${firstOrder.note || "无"}`,
+      "---------------------",
+      "配送物料：",
+      ...orderRows.results.map((order) => `${order.sku} × ${order.quantity}`),
+    ].join("\n");
+    const smtp = gmailSmtpSettings();
+    let emailSent = false;
+    let emailError = "";
+    if (!smtp.username || !smtp.appPassword) {
+      emailError = "Gmail SMTP 尚未配置";
+    } else {
+      try {
+        await sendGmailSmtp({
+          username: smtp.username,
+          appPassword: smtp.appPassword,
+          to: driverEmail,
+          subject: emailSubject,
+          text: emailBody,
+        });
+        emailSent = true;
+      } catch (smtpError) {
+        emailError = smtpError instanceof Error ? smtpError.message : "Gmail SMTP 发送失败";
+      }
+    }
+    await database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
+      .bind("采购", emailSent ? "邮件通知" : "邮件失败", `${driver} · ${driverEmail} · ${firstOrder.customer}${emailError ? ` · ${emailError}` : ""}`)
+      .run();
+    return Response.json({ ok: true, message, emailSent, emailError });
   }
 
   if (body.action === "editTask") {
@@ -446,9 +533,11 @@ export async function POST(request: Request) {
     const address = String(body.address || "").trim();
     const plannedDate = String(body.plannedDate || "").trim();
     const driver = String(body.driver || "").trim();
+    const driverEmail = String(body.driverEmail || "").trim();
     const salesRep = String(body.salesRep || "").trim();
     const note = String(body.note || "").trim();
-    if (!customer || !address || !plannedDate || !driver || !salesRep) return error("请完整填写任务内容");
+    if (!customer || !address || !plannedDate || !driver || !driverEmail || !salesRep) return error("请完整填写任务内容");
+    if (!isEmailAddress(driverEmail)) return error("请输入有效的司机邮箱");
 
     const orderGroup = firstOrder.order_group || crypto.randomUUID();
     const itemText = items.map((item) => `${item.sku} × ${item.quantity}`).join("，");
@@ -458,9 +547,9 @@ export async function POST(request: Request) {
         database.prepare(`
           INSERT INTO orders (
             order_group, sales_rep, customer, phone, sku, quantity, created_at,
-            status, address, planned_date, driver, note
+            status, address, planned_date, driver, driver_email, note
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?)
         `).bind(
           orderGroup,
           salesRep,
@@ -472,6 +561,7 @@ export async function POST(request: Request) {
           address,
           plannedDate,
           driver,
+          driverEmail,
           note,
         ),
       ),
