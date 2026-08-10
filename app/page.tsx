@@ -7,6 +7,7 @@ type InventoryItem = {
   category: string;
   status: string;
   on_hand: number;
+  reserved: number;
   pending: number;
   available: number;
 };
@@ -293,6 +294,8 @@ export default function Home() {
         category: form.get("category"),
         status: form.get("status"),
         onHand: Number(form.get("onHand")),
+        pending: Number(form.get("pending")),
+        available: Number(form.get("available")),
       });
       setEditingInventory(null);
       notify(tr("库存信息已更新", "Inventory item updated"));
@@ -813,7 +816,7 @@ export default function Home() {
             <div className="task-modal-header">
               <div>
                 <h3>{tr("修改库存", "Edit inventory")}</h3>
-                <p>{tr("修改型号、类别、实际库存和状态。", "Update SKU, category, on-hand stock, and status.")}</p>
+                <p>{tr("修改型号、类别、库存数量和状态。", "Update SKU, category, stock quantities, and status.")}</p>
               </div>
               <button
                 type="button"
@@ -840,7 +843,18 @@ export default function Home() {
                 </select>
               </label>
               <label>{tr("实际在库", "On hand")}
-                <input name="onHand" type="number" min="0" step="1" defaultValue={editingInventory.on_hand} required />
+                <input
+                  name="onHand"
+                  type="number"
+                  min={editingInventory.reserved}
+                  step="1"
+                  value={editingInventory.on_hand}
+                  onChange={(event) => {
+                    const onHand = Math.max(editingInventory.reserved, Number(event.target.value));
+                    setEditingInventory({ ...editingInventory, on_hand: onHand, available: onHand - editingInventory.reserved });
+                  }}
+                  required
+                />
               </label>
               <label>{tr("状态", "Status")}
                 <select name="status" defaultValue={editingInventory.status} required>
@@ -850,12 +864,46 @@ export default function Home() {
                   <option value="订购中">{tr("订购中", "On order")}</option>
                 </select>
               </label>
+              <label>Pending
+                <input
+                  name="pending"
+                  type="number"
+                  min={editingInventory.reserved}
+                  step="1"
+                  value={editingInventory.pending}
+                  onChange={(event) => setEditingInventory({
+                    ...editingInventory,
+                    pending: Math.max(editingInventory.reserved, Number(event.target.value)),
+                  })}
+                  required
+                />
+              </label>
+              <label>Available
+                <input
+                  name="available"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={editingInventory.available}
+                  onChange={(event) => {
+                    const available = Math.max(0, Number(event.target.value));
+                    setEditingInventory({
+                      ...editingInventory,
+                      available,
+                      on_hand: available + editingInventory.reserved,
+                    });
+                  }}
+                  required
+                />
+              </label>
             </div>
 
             <div className="inventory-derived">
-              <span>{tr("已预留", "Reserved")} <b>{editingInventory.pending}</b></span>
-              <span>{tr("当前可销售", "Currently available")} <b>{editingInventory.available}</b></span>
-              <small>{tr("Pending 和 Available 会根据订单自动计算。", "Pending and Available are calculated automatically from orders.")}</small>
+              <span className="task-field-wide">{tr("销售订单已预留", "Reserved by sales orders")} <b>{editingInventory.reserved}</b></span>
+              <small>{tr(
+                "修改 On hand 会同步 Available；修改 Available 会反推 On hand。Pending 不能低于销售订单预留数量。",
+                "Changing On hand updates Available; changing Available updates On hand. Pending cannot be lower than sales-order reservations.",
+              )}</small>
             </div>
 
             <div className="modal-actions task-modal-actions">

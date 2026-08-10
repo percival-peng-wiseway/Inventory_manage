@@ -72,6 +72,28 @@ test("direct status changes remain admin-only", async () => {
   assert.match(route, /WHERE status <> '订购中' AND ordered_quantity > 0/);
 });
 
+test("admins can edit on-hand, pending, and available inventory values safely", async () => {
+  const [page, route] = await Promise.all([
+    readFile(pageUrl, "utf8"),
+    readFile(routeUrl, "utf8"),
+  ]);
+
+  assert.match(route, /AS reserved/);
+  const editInventoryBlock = route.match(/if \(body\.action === "editInventory"\)[\s\S]*?return Response\.json\(\{ ok: true \}\);/)?.[0] ?? "";
+  assert.match(editInventoryBlock, /if \(!await isAdminRequest\(request\)\) return error\("需要管理员权限", 403\)/);
+  assert.match(editInventoryBlock, /const pending = Number\(body\.pending\)/);
+  assert.match(editInventoryBlock, /const available = Number\(body\.available\)/);
+  assert.match(editInventoryBlock, /pending < reservedQuantity/);
+  assert.match(editInventoryBlock, /available !== onHand - reservedQuantity/);
+  assert.match(editInventoryBlock, /orderedQuantity = pending - reservedQuantity/);
+  assert.match(editInventoryBlock, /ordered_quantity = \?/);
+  assert.match(page, /name="onHand"[\s\S]*?value=\{editingInventory\.on_hand\}/);
+  assert.match(page, /name="pending"[\s\S]*?value=\{editingInventory\.pending\}/);
+  assert.match(page, /name="available"[\s\S]*?value=\{editingInventory\.available\}/);
+  assert.match(page, /pending: Number\(form\.get\("pending"\)\)/);
+  assert.match(page, /available: Number\(form\.get\("available"\)\)/);
+});
+
 test("dispatch stores the driver email and sends the preset order email through Gmail SMTP", async () => {
   const [page, route, smtp, schema, migration, wrangler] = await Promise.all([
     readFile(pageUrl, "utf8"),

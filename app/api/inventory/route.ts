@@ -247,6 +247,7 @@ export async function GET(request: Request) {
         i.category,
         i.status,
         i.on_hand,
+        COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS reserved,
         i.ordered_quantity + COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS pending,
         i.on_hand - COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS available
       FROM inventory i
@@ -294,10 +295,14 @@ export async function POST(request: Request) {
     const category = String(body.category || "");
     const status = String(body.status || "");
     const onHand = Number(body.onHand);
+    const pending = Number(body.pending);
+    const available = Number(body.available);
     if (!originalSku || !sku) return error("型号无效");
     if (!["电池", "太阳能板", "逆变器", "安装配件", "其他"].includes(category)) return error("库存类别无效");
     if (!["充足", "积压", "低库存", "订购中"].includes(status)) return error("库存状态无效");
     if (!Number.isInteger(onHand) || onHand < 0) return error("实际库存必须是非负整数");
+    if (!Number.isInteger(pending) || pending < 0) return error("Pending 必须是非负整数");
+    if (!Number.isInteger(available) || available < 0) return error("Available 必须是非负整数");
 
     const item = await database.prepare("SELECT sku FROM inventory WHERE sku = ?")
       .bind(originalSku).first<{ sku: string }>();
@@ -313,19 +318,26 @@ export async function POST(request: Request) {
       FROM orders
       WHERE sku = ? AND status IN ('pending', 'scheduled')
     `).bind(originalSku).first<{ quantity: number }>();
-    if (onHand < (reserved?.quantity || 0)) {
-      return error(`实际库存不能低于已预留数量 ${reserved?.quantity || 0}`);
+    const reservedQuantity = reserved?.quantity || 0;
+    if (onHand < reservedQuantity) {
+      return error(`实际库存不能低于销售订单已预留数量 ${reservedQuantity}`);
     }
+    if (pending < reservedQuantity) return error(`Pending 不能低于销售订单已预留数量 ${reservedQuantity}`);
+    if (available !== onHand - reservedQuantity) {
+      return error(`Available 必须等于 On hand 减去订单预留数量，目前应为 ${onHand - reservedQuantity}`);
+    }
+    const orderedQuantity = pending - reservedQuantity;
+    if (orderedQuantity > 0 && status !== "订购中") return error("Pending 高于订单预留数量时，状态必须选择 On order");
 
     await database.batch([
       database.prepare(`
         UPDATE inventory
-        SET sku = ?, category = ?, status = ?, on_hand = ?, updated_at = CURRENT_TIMESTAMP
+        SET sku = ?, category = ?, status = ?, on_hand = ?, ordered_quantity = ?, updated_at = CURRENT_TIMESTAMP
         WHERE sku = ?
-      `).bind(sku, category, status, onHand, originalSku),
+      `).bind(sku, category, status, onHand, orderedQuantity, originalSku),
       database.prepare("UPDATE orders SET sku = ? WHERE sku = ?").bind(sku, originalSku),
       database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
-        .bind("管理员", "修改库存", `${originalSku} → ${sku} · ${category} · ${onHand} · ${status}`),
+        .bind("管理员", "修改库存", `${originalSku} → ${sku} · ${category} · On hand ${onHand} · Pending ${pending} · Available ${available} · ${status}`),
     ]);
     return Response.json({ ok: true });
   }
