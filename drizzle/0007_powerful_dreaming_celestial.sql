@@ -1,0 +1,1 @@
+CREATE INDEX `idx_orders_status_delivered_at` ON `orders` (`status`,`delivered_at`);

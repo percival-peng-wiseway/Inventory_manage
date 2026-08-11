@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export const inventory = sqliteTable("inventory", {
@@ -27,7 +27,9 @@ export const orders = sqliteTable("orders", {
   driverEmail: text("driver_email"),
   deliveredAt: text("delivered_at"),
   note: text("note"),
-});
+}, (table) => [
+  index("idx_orders_status_delivered_at").on(table.status, table.deliveredAt),
+]);
 
 export const arrivals = sqliteTable("arrivals", {
   id: integer("id").primaryKey({ autoIncrement: true }),

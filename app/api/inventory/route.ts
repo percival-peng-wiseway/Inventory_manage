@@ -166,6 +166,8 @@ async function initializeDatabase() {
       detail TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
+    database.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_status_delivered_at
+      ON orders(status, delivered_at DESC)`),
   ]);
 
   const inventoryColumns = await database.prepare("PRAGMA table_info(inventory)").all<{ name: string }>();
@@ -240,7 +242,7 @@ async function initializeDatabase() {
 export async function GET(request: Request) {
   await ensureDatabase();
   const database = db();
-  const [inventory, orders, logs] = await Promise.all([
+  const [inventory, orders, deliveryHistory, logs] = await Promise.all([
     database.prepare(`
       SELECT
         i.sku,
@@ -256,11 +258,13 @@ export async function GET(request: Request) {
       ORDER BY CASE WHEN i.status = '订购中' THEN 0 ELSE 1 END, i.rowid
     `).all(),
     database.prepare("SELECT * FROM orders ORDER BY id DESC LIMIT 200").all(),
+    database.prepare("SELECT * FROM orders WHERE status = 'delivered' ORDER BY delivered_at DESC, id DESC").all(),
     database.prepare("SELECT * FROM operations ORDER BY id DESC LIMIT 300").all(),
   ]);
   return Response.json({
     inventory: inventory.results,
     orders: orders.results,
+    deliveryHistory: deliveryHistory.results,
     logs: logs.results,
     admin: await isAdminRequest(request),
   });

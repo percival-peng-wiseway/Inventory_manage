@@ -41,8 +41,8 @@ type LogEntry = {
   detail: string;
   created_at: string;
 };
-type ApiState = { inventory: InventoryItem[]; orders: Order[]; logs: LogEntry[]; admin: boolean };
-type View = "overview" | "sale" | "dispatch" | "arrival" | "driver" | "log";
+type ApiState = { inventory: InventoryItem[]; orders: Order[]; deliveryHistory: Order[]; logs: LogEntry[]; admin: boolean };
+type View = "overview" | "sale" | "dispatch" | "arrival" | "driver" | "history" | "log";
 type Language = "zh" | "en";
 type ArrivalMode = "received" | "ordered";
 
@@ -54,7 +54,7 @@ const DELIVERY_TIME_OPTIONS = Array.from({ length: 9 }, (_, index) => {
   };
 });
 
-const initialState: ApiState = { inventory: [], orders: [], logs: [], admin: false };
+const initialState: ApiState = { inventory: [], orders: [], deliveryHistory: [], logs: [], admin: false };
 
 export default function Home() {
   const [data, setData] = useState<ApiState>(initialState);
@@ -72,6 +72,8 @@ export default function Home() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [stockFilter, setStockFilter] = useState("all");
   const [sortBy, setSortBy] = useState("sku");
+  const [historyStart, setHistoryStart] = useState("");
+  const [historyEnd, setHistoryEnd] = useState("");
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
   const [editingInventory, setEditingInventory] = useState<InventoryItem | null>(null);
@@ -148,6 +150,13 @@ export default function Home() {
 
   const waitingGroups = groupOrderRows(data.orders.filter((order) => order.status === "pending"));
   const driverGroups = groupOrderRows(data.orders.filter((order) => order.status === "scheduled"));
+  const historyGroups = useMemo(() => groupOrderRows(data.deliveryHistory).filter((group) => {
+    if (!group.primary.delivered_at) return false;
+    const deliveredAt = databaseTimestamp(group.primary.delivered_at).getTime();
+    const start = historyStart ? new Date(`${historyStart}T00:00:00`).getTime() : Number.NEGATIVE_INFINITY;
+    const end = historyEnd ? new Date(`${historyEnd}T23:59:59.999`).getTime() : Number.POSITIVE_INFINITY;
+    return deliveredAt >= start && deliveredAt <= end;
+  }), [data.deliveryHistory, historyStart, historyEnd]);
   const filteredInventory = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     return data.inventory
@@ -464,6 +473,7 @@ export default function Home() {
           ["dispatch", tr("采购调度", "Dispatch"), waitingGroups.length ? String(waitingGroups.length) : ""],
           ["arrival", tr("新货入库", "Receive stock"), ""],
           ["driver", tr("送货任务", "Dispatch Tasks"), driverGroups.length ? String(driverGroups.length) : ""],
+          ["history", tr("送货历史", "History"), ""],
           ["log", tr("操作日志", "Activity log"), ""],
         ] as [View, string, string][]).map(([key, label, count]) => (
           <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}>
@@ -768,6 +778,80 @@ export default function Home() {
                 </article>
               ))}</div>
             }
+          </>
+        )}
+
+        {view === "history" && (
+          <>
+            <div className="section-heading">
+              <div>
+                <h2>{tr("送货历史", "Delivery history")}</h2>
+                <p className="muted">{tr("查看所有已经完成的送货项目。", "Review every completed delivery.")}</p>
+              </div>
+            </div>
+            <div className="history-filters panel">
+              <label>{tr("开始日期", "From")}
+                <input
+                  type="date"
+                  value={historyStart}
+                  max={historyEnd || undefined}
+                  onChange={(event) => setHistoryStart(event.target.value)}
+                />
+              </label>
+              <label>{tr("结束日期", "To")}
+                <input
+                  type="date"
+                  value={historyEnd}
+                  min={historyStart || undefined}
+                  onChange={(event) => setHistoryEnd(event.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                className="secondary"
+                disabled={!historyStart && !historyEnd}
+                onClick={() => {
+                  setHistoryStart("");
+                  setHistoryEnd("");
+                }}
+              >
+                {tr("清除筛选", "Clear filter")}
+              </button>
+              <span className="history-count">
+                {tr("已完成", "Completed")} <b>{historyGroups.length}</b>
+              </span>
+            </div>
+            {historyGroups.length === 0 ? (
+              <Empty
+                text={tr("没有符合条件的送货记录", "No matching deliveries")}
+                sub={tr("请调整日期范围，或等待送货任务完成。", "Adjust the date range or wait for a delivery to be completed.")}
+              />
+            ) : (
+              <div className="driver-grid history-grid">{historyGroups.map((group) => (
+                <article className="driver-card history-card" key={group.key}>
+                  <div className="driver-date">
+                    <span>{tr("完成时间", "Completed")}</span>
+                    <strong>{group.primary.delivered_at ? formatDateTime(group.primary.delivered_at, lang) : "—"}</strong>
+                  </div>
+                  <div className="history-status">✓ {tr("已送达", "Delivered")}</div>
+                  <h3>{group.primary.customer}</h3>
+                  <p>{group.primary.address}</p>
+                  <div className="history-meta">
+                    <span><b>{tr("送货日期", "Delivery date")}</b>{group.primary.planned_date || "—"}</span>
+                    <span><b>{tr("司机", "Driver")}</b>{group.primary.driver || "—"}</span>
+                    <span><b>{tr("下单人", "Created by")}</b>{group.primary.sales_rep}</span>
+                  </div>
+                  {group.primary.phone && <a href={`tel:${group.primary.phone}`}>{group.primary.phone}</a>}
+                  <div className="driver-note">
+                    <b>{tr("备注", "Note")}</b>
+                    <span>{group.primary.note || tr("无", "None")}</span>
+                  </div>
+                  <div className="product-lines">
+                    {group.orders.map((order) => <div className="product-line" key={order.id}><b>{order.sku}</b><strong>× {order.quantity}</strong></div>)}
+                  </div>
+                </article>
+              ))}</div>
+            )}
           </>
         )}
 
@@ -1137,12 +1221,16 @@ function formatDeliveryTime(value: string) {
 }
 
 function formatDateTime(value: string, lang: Language) {
-  return new Date(`${value.replace(" ", "T")}Z`).toLocaleString(lang === "zh" ? "zh-CN" : "en-AU", {
+  return databaseTimestamp(value).toLocaleString(lang === "zh" ? "zh-CN" : "en-AU", {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function databaseTimestamp(value: string) {
+  return new Date(`${value.replace(" ", "T")}Z`);
 }
 
 function translateLog(value: string, lang: Language) {

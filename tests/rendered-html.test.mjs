@@ -174,3 +174,29 @@ test("orders persist an estimated delivery time between 9 AM and 5 PM", async ()
   assert.match(schema, /deliveryTime: text\("delivery_time"\)/);
   assert.match(migration, /ALTER TABLE `orders` ADD `delivery_time` text/);
 });
+
+test("delivery history lists all completed tasks and filters by completion date", async () => {
+  const [page, route, css, schema] = await Promise.all([
+    readFile(pageUrl, "utf8"),
+    readFile(routeUrl, "utf8"),
+    readFile(cssUrl, "utf8"),
+    readFile(schemaUrl, "utf8"),
+  ]);
+
+  assert.match(page, /"driver" \| "history" \| "log"/);
+  assert.match(page, /deliveryHistory: Order\[\]/);
+  assert.match(page, /\["history", tr\("送货历史", "History"\)/);
+  assert.match(page, /const \[historyStart, setHistoryStart\] = useState\(""\)/);
+  assert.match(page, /const \[historyEnd, setHistoryEnd\] = useState\(""\)/);
+  assert.match(page, /databaseTimestamp\(group\.primary\.delivered_at\)/);
+  assert.match(page, /view === "history"/);
+  assert.match(page, /type="date"[\s\S]*?value=\{historyStart\}/);
+  assert.match(page, /type="date"[\s\S]*?value=\{historyEnd\}/);
+  assert.match(page, /className="driver-grid history-grid"/);
+  assert.match(route, /WHERE status = 'delivered' ORDER BY delivered_at DESC, id DESC/);
+  assert.match(route, /deliveryHistory: deliveryHistory\.results/);
+  assert.match(route, /CREATE INDEX IF NOT EXISTS idx_orders_status_delivered_at/);
+  assert.match(schema, /index\("idx_orders_status_delivered_at"\)\.on\(table\.status, table\.deliveredAt\)/);
+  assert.match(css, /\.history-filters\s*\{/);
+  assert.match(css, /\.history-status\s*\{/);
+});
