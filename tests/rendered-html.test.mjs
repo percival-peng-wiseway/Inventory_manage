@@ -11,6 +11,7 @@ const smtpMigrationUrl = new URL("../drizzle/0005_green_marrow.sql", import.meta
 const deliveryTimeMigrationUrl = new URL("../drizzle/0006_purple_surge.sql", import.meta.url);
 const wranglerUrl = new URL("../wrangler.jsonc", import.meta.url);
 const orderedQuantityMigrationUrl = new URL("../drizzle/0004_grey_gambit.sql", import.meta.url);
+const stockLossMigrationUrl = new URL("../drizzle/0008_lowly_synch.sql", import.meta.url);
 
 test("receive-stock confirmation supports receipt and ordering", async () => {
   const page = await readFile(pageUrl, "utf8");
@@ -188,7 +189,7 @@ test("delivery history lists all completed tasks and filters by completion date"
   assert.match(page, /\["history", tr\("送货历史", "History"\)/);
   assert.match(page, /const \[historyStart, setHistoryStart\] = useState\(""\)/);
   assert.match(page, /const \[historyEnd, setHistoryEnd\] = useState\(""\)/);
-  assert.match(page, /databaseTimestamp\(group\.primary\.delivered_at\)/);
+  assert.match(page, /isWithinDateRange\(group\.primary\.delivered_at, historyStart, historyEnd\)/);
   assert.match(page, /view === "history"/);
   assert.match(page, /type="date"[\s\S]*?value=\{historyStart\}/);
   assert.match(page, /type="date"[\s\S]*?value=\{historyEnd\}/);
@@ -199,4 +200,54 @@ test("delivery history lists all completed tasks and filters by completion date"
   assert.match(schema, /index\("idx_orders_status_delivered_at"\)\.on\(table\.status, table\.deliveredAt\)/);
   assert.match(css, /\.history-filters\s*\{/);
   assert.match(css, /\.history-status\s*\{/);
+});
+
+test("inventory consumption totals delivered items and shows customer details by SKU", async () => {
+  const [page, route, css] = await Promise.all([
+    readFile(pageUrl, "utf8"),
+    readFile(routeUrl, "utf8"),
+    readFile(cssUrl, "utf8"),
+  ]);
+
+  assert.match(route, /CASE WHEN o\.status = 'delivered' THEN o\.quantity ELSE 0 END\), 0\) AS consumption/);
+  assert.match(page, /consumption: number/);
+  assert.match(page, /<th>Consumption<\/th>/);
+  assert.match(page, /className="sku-link" onClick=\{\(\) => setConsumptionSku\(item\.sku\)\}/);
+  assert.match(page, /className="stock-number consumption-number">\{item\.consumption\}/);
+  assert.match(page, /data\.deliveryHistory[\s\S]*?\.filter\(\(order\) => order\.sku === consumptionSku/);
+  assert.match(page, /aria-labelledby="consumption-title"/);
+  assert.match(page, /order\.customer/);
+  assert.match(page, /order\.quantity/);
+  assert.match(css, /\.sku-link\s*\{/);
+  assert.match(css, /\.consumption-modal\s*\{/);
+});
+
+test("admins can report damaged stock and retain the loss in history and SKU details", async () => {
+  const [page, route, css, schema, migration] = await Promise.all([
+    readFile(pageUrl, "utf8"),
+    readFile(routeUrl, "utf8"),
+    readFile(cssUrl, "utf8"),
+    readFile(schemaUrl, "utf8"),
+    readFile(stockLossMigrationUrl, "utf8"),
+  ]);
+
+  const reportLossBlock = route.match(/if \(body\.action === "reportLoss"\)[\s\S]*?return Response\.json\(\{ ok: true \}\);/)?.[0] ?? "";
+  assert.match(reportLossBlock, /if \(!await isAdminRequest\(request\)\) return error\("需要管理员权限", 403\)/);
+  assert.match(reportLossBlock, /quantity > available/);
+  assert.match(reportLossBlock, /UPDATE inventory SET on_hand = on_hand - \?/);
+  assert.match(reportLossBlock, /INSERT INTO stock_losses \(sku, quantity, reason, actor\)/);
+  assert.match(reportLossBlock, /"库存报损"/);
+  assert.match(route, /SELECT \* FROM stock_losses ORDER BY created_at DESC, id DESC/);
+  assert.match(route, /lossHistory: lossHistory\.results/);
+  assert.match(page, /action: "reportLoss"/);
+  assert.match(page, /setReportingLoss\(item\)/);
+  assert.match(page, /max=\{reportingLoss\.available\}/);
+  assert.match(page, /filteredLossHistory/);
+  assert.match(page, /entry\.kind === "loss"/);
+  assert.match(schema, /sqliteTable\("stock_losses"/);
+  assert.match(schema, /idx_stock_losses_sku_created_at/);
+  assert.match(migration, /CREATE TABLE `stock_losses`/);
+  assert.match(migration, /CREATE INDEX `idx_stock_losses_sku_created_at`/);
+  assert.match(css, /\.loss-history-card\s*\{/);
+  assert.match(css, /\.loss-modal\s*\{/);
 });

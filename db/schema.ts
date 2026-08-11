@@ -38,6 +38,17 @@ export const arrivals = sqliteTable("arrivals", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const stockLosses = sqliteTable("stock_losses", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  sku: text("sku").notNull(),
+  quantity: integer("quantity").notNull(),
+  reason: text("reason").notNull(),
+  actor: text("actor").notNull().default("管理员"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("idx_stock_losses_sku_created_at").on(table.sku, table.createdAt),
+]);
+
 export const operations = sqliteTable("operations", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   actor: text("actor").notNull(),

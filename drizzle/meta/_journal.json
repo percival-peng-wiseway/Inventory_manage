@@ -57,6 +57,13 @@
       "when": 1786417645530,
       "tag": "0007_powerful_dreaming_celestial",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1786421862190,
+      "tag": "0008_lowly_synch",
+      "breakpoints": true
     }
   ]
 }

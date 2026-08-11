@@ -166,8 +166,18 @@ async function initializeDatabase() {
       detail TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
+    database.prepare(`CREATE TABLE IF NOT EXISTS stock_losses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sku TEXT NOT NULL,
+      quantity INTEGER NOT NULL,
+      reason TEXT NOT NULL,
+      actor TEXT NOT NULL DEFAULT '管理员',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
     database.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_status_delivered_at
       ON orders(status, delivered_at DESC)`),
+    database.prepare(`CREATE INDEX IF NOT EXISTS idx_stock_losses_sku_created_at
+      ON stock_losses(sku, created_at DESC)`),
   ]);
 
   const inventoryColumns = await database.prepare("PRAGMA table_info(inventory)").all<{ name: string }>();
@@ -236,13 +246,14 @@ async function initializeDatabase() {
       updated_at = CURRENT_TIMESTAMP
     WHERE status <> '订购中' AND ordered_quantity > 0
   `).run();
+  await database.prepare("PRAGMA optimize").run();
 
 }
 
 export async function GET(request: Request) {
   await ensureDatabase();
   const database = db();
-  const [inventory, orders, deliveryHistory, logs] = await Promise.all([
+  const [inventory, orders, deliveryHistory, lossHistory, logs] = await Promise.all([
     database.prepare(`
       SELECT
         i.sku,
@@ -251,7 +262,8 @@ export async function GET(request: Request) {
         i.on_hand,
         COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS reserved,
         i.ordered_quantity + COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS pending,
-        i.on_hand - COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS available
+        i.on_hand - COALESCE(SUM(CASE WHEN o.status IN ('pending', 'scheduled') THEN o.quantity ELSE 0 END), 0) AS available,
+        COALESCE(SUM(CASE WHEN o.status = 'delivered' THEN o.quantity ELSE 0 END), 0) AS consumption
       FROM inventory i
       LEFT JOIN orders o ON i.sku = o.sku
       GROUP BY i.sku, i.category, i.status, i.on_hand, i.ordered_quantity
@@ -259,12 +271,14 @@ export async function GET(request: Request) {
     `).all(),
     database.prepare("SELECT * FROM orders ORDER BY id DESC LIMIT 200").all(),
     database.prepare("SELECT * FROM orders WHERE status = 'delivered' ORDER BY delivered_at DESC, id DESC").all(),
+    database.prepare("SELECT * FROM stock_losses ORDER BY created_at DESC, id DESC").all(),
     database.prepare("SELECT * FROM operations ORDER BY id DESC LIMIT 300").all(),
   ]);
   return Response.json({
     inventory: inventory.results,
     orders: orders.results,
     deliveryHistory: deliveryHistory.results,
+    lossHistory: lossHistory.results,
     logs: logs.results,
     admin: await isAdminRequest(request),
   });
@@ -340,8 +354,40 @@ export async function POST(request: Request) {
         WHERE sku = ?
       `).bind(sku, category, status, onHand, orderedQuantity, originalSku),
       database.prepare("UPDATE orders SET sku = ? WHERE sku = ?").bind(sku, originalSku),
+      database.prepare("UPDATE stock_losses SET sku = ? WHERE sku = ?").bind(sku, originalSku),
       database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
         .bind("管理员", "修改库存", `${originalSku} → ${sku} · ${category} · On hand ${onHand} · Pending ${pending} · Available ${available} · ${status}`),
+    ]);
+    return Response.json({ ok: true });
+  }
+
+  if (body.action === "reportLoss") {
+    if (!await isAdminRequest(request)) return error("需要管理员权限", 403);
+    const sku = String(body.sku || "").trim();
+    const quantity = Number(body.quantity);
+    const reason = String(body.reason || "").trim();
+    if (!sku) return error("型号无效");
+    if (!Number.isInteger(quantity) || quantity < 1) return error("报损数量必须是正整数");
+    if (!reason) return error("请填写报损原因");
+
+    const item = await database.prepare("SELECT sku, on_hand FROM inventory WHERE sku = ?")
+      .bind(sku).first<{ sku: string; on_hand: number }>();
+    if (!item) return error("找不到这个型号", 404);
+    const reserved = await database.prepare(`
+      SELECT COALESCE(SUM(quantity), 0) AS quantity
+      FROM orders
+      WHERE sku = ? AND status IN ('pending', 'scheduled')
+    `).bind(sku).first<{ quantity: number }>();
+    const available = item.on_hand - (reserved?.quantity || 0);
+    if (quantity > available) return error(`最多只能报损当前可用库存 ${available}`);
+
+    await database.batch([
+      database.prepare("UPDATE inventory SET on_hand = on_hand - ?, updated_at = CURRENT_TIMESTAMP WHERE sku = ?")
+        .bind(quantity, sku),
+      database.prepare("INSERT INTO stock_losses (sku, quantity, reason, actor) VALUES (?, ?, ?, ?)")
+        .bind(sku, quantity, reason, "管理员"),
+      database.prepare("INSERT INTO operations (actor, action, detail) VALUES (?, ?, ?)")
+        .bind("管理员", "库存报损", `${sku} × ${quantity} · ${reason}`),
     ]);
     return Response.json({ ok: true });
   }

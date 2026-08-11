@@ -75,7 +75,11 @@ th { padding: 11px 18px; color: var(--muted); font-size: 11px; text-align: left;
 td { padding: 12px 18px; border-top: 1px solid #eceee9; font-size: 13px; font-variant-numeric: tabular-nums; }
 tbody tr:hover { background: #fbfcf8; }
 .pending-number { color: #a55d0a; font-weight: 800; }
+.consumption-number { color: #315f9c; }
 .stock-number { font-size: 17px; line-height: 1; font-weight: 800; font-variant-numeric: tabular-nums; }
+.sku-link { border: 0; padding: 2px 0; background: transparent; color: var(--ink); font-weight: 800; text-align: left; text-decoration: underline; text-decoration-color: #8bb49a; text-decoration-thickness: 1px; text-underline-offset: 4px; }
+.sku-link:hover { color: var(--forest-2); text-decoration-thickness: 2px; }
+.sku-link:focus-visible { border-radius: 3px; outline: 3px solid rgba(47,106,80,.18); outline-offset: 3px; }
 .category-badge { display: inline-block; padding: 5px 9px; border: 1px solid; border-radius: 8px; font-size: 11px; font-weight: 800; }
 .category-battery { background: #e5effd; border-color: #b8cfee; color: #315f9c; }
 .category-solar { background: #fff0d4; border-color: #ead1a5; color: #9a5a09; }
@@ -118,10 +122,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
 .delete-mini { border: 1px solid #e3bdb7; border-radius: 7px; padding: 6px 9px; background: #fff6f4; color: #a13d32; font-size: 11px; font-weight: 800; white-space: nowrap; }
 .delete-mini:hover { background: #fce8e4; }
 .delete-mini:disabled { opacity: .45; cursor: not-allowed; }
-.inventory-actions { display: flex; gap: 6px; }
+.inventory-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .edit-mini { border: 1px solid #bad8c4; border-radius: 7px; padding: 6px 9px; background: var(--mint); color: var(--forest); font-size: 11px; font-weight: 800; white-space: nowrap; }
 .edit-mini:hover { background: #cee3d5; }
 .edit-mini:disabled { opacity: .45; cursor: not-allowed; }
+.loss-mini { border: 1px solid #e8b5ae; border-radius: 7px; padding: 6px 9px; background: #fde8e6; color: #a13d32; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.loss-mini:hover { background: #f9d6d2; }
+.loss-mini:disabled { opacity: .4; cursor: not-allowed; }
 
 .textarea-label textarea { min-height: 150px; resize: vertical; margin-bottom: 8px; }
 .example { margin-top: 28px; padding: 18px; background: #ece9db; border-left: 4px solid var(--amber); line-height: 1.7; }
@@ -172,6 +179,12 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
 .history-meta { display: grid; gap: 7px; margin: 14px 0 16px; padding: 12px 13px; border-radius: 9px; background: #f2f3ee; }
 .history-meta span { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px; }
 .history-meta b { color: var(--ink); }
+.history-sections { display: grid; gap: 30px; }
+.history-section-title { margin-bottom: 14px; color: var(--forest); font-size: 17px; }
+.loss-history-card { border-color: #e8c6c1; }
+.loss-date { color: #9d4a41; }
+.loss-status { border-color: #e8b5ae; background: #fde8e6; color: #a13d32; }
+.loss-quantity { margin: 14px 0; color: #a13d32; font-size: 32px; line-height: 1; font-weight: 900; }
 
 .empty { text-align: center; border: 1px dashed #bdc9c0; border-radius: 16px; padding: 70px 20px; background: rgba(255,255,255,.45); }
 .empty span { width: 48px; height: 48px; display: grid; place-items: center; margin: 0 auto 17px; border-radius: 50%; background: var(--mint); color: var(--forest); font-weight: 900; }
@@ -199,6 +212,22 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
 .task-modal-backdrop { overflow-y: auto; }
 .task-modal { width: min(780px, 100%); max-height: calc(100vh - 40px); overflow-y: auto; display: grid; gap: 22px; padding: 28px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper); box-shadow: 0 24px 70px rgba(0,0,0,.2); }
 .inventory-modal { width: min(580px, 100%); }
+.consumption-modal { width: min(860px, 100%); }
+.consumption-summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.consumption-summary { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 18px; border-radius: 11px; background: #e5effd; color: #315f9c; font-weight: 800; }
+.consumption-summary strong { font-size: 28px; }
+.consumption-summary.loss-summary { background: #fde8e6; color: #a13d32; }
+.consumption-empty { padding: 46px 20px; border: 1px dashed #bdc9c0; border-radius: 12px; color: var(--muted); text-align: center; }
+.consumption-table { box-shadow: none; }
+.consumption-table th:last-child, .consumption-table td:last-child { text-align: right; }
+.history-type { display: inline-block; padding: 5px 8px; border: 1px solid; border-radius: 99px; font-size: 10px; font-weight: 800; white-space: nowrap; }
+.delivery-type { border-color: #bad8c4; background: #dff0e4; color: #276342; }
+.loss-type { border-color: #e8b5ae; background: #fde8e6; color: #a13d32; }
+.loss-number { color: #a13d32; }
+.loss-modal { width: min(560px, 100%); }
+.loss-stock-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 16px; border-radius: 11px; background: #f2f3ee; }
+.loss-stock-summary span { display: flex; justify-content: space-between; gap: 12px; }
+.loss-submit { min-width: 150px; }
 .task-modal-header { display: flex; justify-content: space-between; gap: 20px; align-items: start; }
 .task-modal-header h3 { font-size: 25px; }
 .task-modal-header p { margin: 6px 0 0; color: var(--muted); }
@@ -267,6 +296,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
   .inventory-derived { grid-template-columns: 1fr; }
   .inventory-derived small { grid-column: auto; }
   .inventory-actions { min-width: 118px; }
+  .consumption-modal { max-height: 88vh; }
+  .consumption-summary-grid, .loss-stock-summary { grid-template-columns: 1fr; }
   .task-edit-items .sale-item-row { padding: 10px; }
   .task-modal-actions { position: sticky; bottom: -20px; margin: 0 -16px -20px; padding: 14px 16px max(14px, env(safe-area-inset-bottom)); background: var(--paper); }
 }

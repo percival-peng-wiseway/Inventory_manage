@@ -10,6 +10,7 @@ type InventoryItem = {
   reserved: number;
   pending: number;
   available: number;
+  consumption: number;
 };
 
 type Order = {
@@ -41,7 +42,23 @@ type LogEntry = {
   detail: string;
   created_at: string;
 };
-type ApiState = { inventory: InventoryItem[]; orders: Order[]; deliveryHistory: Order[]; logs: LogEntry[]; admin: boolean };
+type StockLoss = {
+  id: number;
+  sku: string;
+  quantity: number;
+  reason: string;
+  actor: string;
+  created_at: string;
+};
+type SkuHistoryEntry = {
+  key: string;
+  kind: "delivered" | "loss";
+  createdAt: string;
+  title: string;
+  detail: string;
+  quantity: number;
+};
+type ApiState = { inventory: InventoryItem[]; orders: Order[]; deliveryHistory: Order[]; lossHistory: StockLoss[]; logs: LogEntry[]; admin: boolean };
 type View = "overview" | "sale" | "dispatch" | "arrival" | "driver" | "history" | "log";
 type Language = "zh" | "en";
 type ArrivalMode = "received" | "ordered";
@@ -54,7 +71,7 @@ const DELIVERY_TIME_OPTIONS = Array.from({ length: 9 }, (_, index) => {
   };
 });
 
-const initialState: ApiState = { inventory: [], orders: [], deliveryHistory: [], logs: [], admin: false };
+const initialState: ApiState = { inventory: [], orders: [], deliveryHistory: [], lossHistory: [], logs: [], admin: false };
 
 export default function Home() {
   const [data, setData] = useState<ApiState>(initialState);
@@ -74,6 +91,8 @@ export default function Home() {
   const [sortBy, setSortBy] = useState("sku");
   const [historyStart, setHistoryStart] = useState("");
   const [historyEnd, setHistoryEnd] = useState("");
+  const [consumptionSku, setConsumptionSku] = useState<string | null>(null);
+  const [reportingLoss, setReportingLoss] = useState<InventoryItem | null>(null);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
   const [editingInventory, setEditingInventory] = useState<InventoryItem | null>(null);
@@ -150,13 +169,40 @@ export default function Home() {
 
   const waitingGroups = groupOrderRows(data.orders.filter((order) => order.status === "pending"));
   const driverGroups = groupOrderRows(data.orders.filter((order) => order.status === "scheduled"));
-  const historyGroups = useMemo(() => groupOrderRows(data.deliveryHistory).filter((group) => {
-    if (!group.primary.delivered_at) return false;
-    const deliveredAt = databaseTimestamp(group.primary.delivered_at).getTime();
-    const start = historyStart ? new Date(`${historyStart}T00:00:00`).getTime() : Number.NEGATIVE_INFINITY;
-    const end = historyEnd ? new Date(`${historyEnd}T23:59:59.999`).getTime() : Number.POSITIVE_INFINITY;
-    return deliveredAt >= start && deliveredAt <= end;
-  }), [data.deliveryHistory, historyStart, historyEnd]);
+  const historyGroups = useMemo(
+    () => groupOrderRows(data.deliveryHistory).filter((group) => group.primary.delivered_at
+      && isWithinDateRange(group.primary.delivered_at, historyStart, historyEnd)),
+    [data.deliveryHistory, historyStart, historyEnd],
+  );
+  const filteredLossHistory = useMemo(
+    () => data.lossHistory.filter((loss) => isWithinDateRange(loss.created_at, historyStart, historyEnd)),
+    [data.lossHistory, historyStart, historyEnd],
+  );
+  const skuHistoryEntries = useMemo<SkuHistoryEntry[]>(
+    () => consumptionSku ? [
+      ...data.deliveryHistory
+        .filter((order) => order.sku === consumptionSku && order.delivered_at)
+        .map((order) => ({
+          key: `delivery-${order.id}`,
+          kind: "delivered" as const,
+          createdAt: order.delivered_at as string,
+          title: order.customer,
+          detail: order.address || "",
+          quantity: order.quantity,
+        })),
+      ...data.lossHistory
+        .filter((loss) => loss.sku === consumptionSku)
+        .map((loss) => ({
+          key: `loss-${loss.id}`,
+          kind: "loss" as const,
+          createdAt: loss.created_at,
+          title: loss.reason,
+          detail: loss.actor,
+          quantity: loss.quantity,
+        })),
+    ].sort((a, b) => databaseTimestamp(b.createdAt).getTime() - databaseTimestamp(a.createdAt).getTime()) : [],
+    [consumptionSku, data.deliveryHistory, data.lossHistory],
+  );
   const filteredInventory = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     return data.inventory
@@ -310,6 +356,24 @@ export default function Home() {
       notify(tr("库存信息已更新", "Inventory item updated"));
     } catch (error) {
       notify(error instanceof Error ? error.message : tr("修改失败", "Update failed"));
+    }
+  };
+
+  const handleReportLoss = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!reportingLoss) return;
+    const form = new FormData(event.currentTarget);
+    try {
+      await mutate({
+        action: "reportLoss",
+        sku: reportingLoss.sku,
+        quantity: Number(form.get("quantity")),
+        reason: form.get("reason"),
+      });
+      setReportingLoss(null);
+      notify(tr("报损已记录，库存数量已扣减", "Damage recorded and inventory reduced"));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : tr("报损失败", "Could not record damage"));
     }
   };
 
@@ -527,15 +591,20 @@ export default function Home() {
               <div className="table-title"><h3>{tr("全部型号", "All SKUs")}</h3><span>{filteredInventory.length} SKU</span></div>
               <div className="table-scroll">
                 <table>
-                  <thead><tr><th>{tr("型号", "SKU")}</th><th>{tr("类别", "Category")}</th><th>{tr("实际在库", "On hand")}</th><th>Pending</th><th>{tr("可销售", "Available")}</th><th>{tr("状态", "Status")}</th>{data.admin && <th>{tr("管理", "Manage")}</th>}</tr></thead>
+                  <thead><tr><th>{tr("型号", "SKU")}</th><th>{tr("类别", "Category")}</th><th>{tr("实际在库", "On hand")}</th><th>Pending</th><th>{tr("可销售", "Available")}</th><th>Consumption</th><th>{tr("状态", "Status")}</th>{data.admin && <th>{tr("管理", "Manage")}</th>}</tr></thead>
                   <tbody>
                     {filteredInventory.map((item) => (
                       <tr key={item.sku}>
-                        <td><b>{item.sku}</b></td>
+                        <td>
+                          <button type="button" className="sku-link" onClick={() => setConsumptionSku(item.sku)}>
+                            {item.sku}
+                          </button>
+                        </td>
                         <td><span className={`category-badge ${categoryClass(item.category)}`}>{translateCategory(item.category, lang)}</span></td>
                         <td className="stock-number">{item.on_hand}</td>
                         <td className="stock-number pending-number">{item.pending}</td>
                         <td className="stock-number">{item.available}</td>
+                        <td className="stock-number consumption-number">{item.consumption}</td>
                         <td>
                           {data.admin ? (
                             <select
@@ -561,6 +630,13 @@ export default function Home() {
                             <div className="inventory-actions">
                               <button className="edit-mini" disabled={busy} onClick={() => setEditingInventory(item)}>
                                 {tr("修改", "Edit")}
+                              </button>
+                              <button
+                                className="loss-mini"
+                                disabled={busy || item.available < 1}
+                                onClick={() => setReportingLoss(item)}
+                              >
+                                {tr("报损", "Damage")}
                               </button>
                               <button className="delete-mini" disabled={busy} onClick={() => deleteSku(item.sku)}>
                                 {tr("删除", "Delete")}
@@ -785,8 +861,8 @@ export default function Home() {
           <>
             <div className="section-heading">
               <div>
-                <h2>{tr("送货历史", "Delivery history")}</h2>
-                <p className="muted">{tr("查看所有已经完成的送货项目。", "Review every completed delivery.")}</p>
+                <h2>{tr("历史记录", "History")}</h2>
+                <p className="muted">{tr("查看已完成送货和库存报损。", "Review completed deliveries and inventory damage.")}</p>
               </div>
             </div>
             <div className="history-filters panel">
@@ -818,39 +894,66 @@ export default function Home() {
                 {tr("清除筛选", "Clear filter")}
               </button>
               <span className="history-count">
-                {tr("已完成", "Completed")} <b>{historyGroups.length}</b>
+                {tr("记录", "Records")} <b>{historyGroups.length + filteredLossHistory.length}</b>
               </span>
             </div>
-            {historyGroups.length === 0 ? (
+            {historyGroups.length === 0 && filteredLossHistory.length === 0 ? (
               <Empty
-                text={tr("没有符合条件的送货记录", "No matching deliveries")}
-                sub={tr("请调整日期范围，或等待送货任务完成。", "Adjust the date range or wait for a delivery to be completed.")}
+                text={tr("没有符合条件的历史记录", "No matching history")}
+                sub={tr("请调整日期范围。", "Adjust the date range.")}
               />
             ) : (
-              <div className="driver-grid history-grid">{historyGroups.map((group) => (
-                <article className="driver-card history-card" key={group.key}>
-                  <div className="driver-date">
-                    <span>{tr("完成时间", "Completed")}</span>
-                    <strong>{group.primary.delivered_at ? formatDateTime(group.primary.delivered_at, lang) : "—"}</strong>
-                  </div>
-                  <div className="history-status">✓ {tr("已送达", "Delivered")}</div>
-                  <h3>{group.primary.customer}</h3>
-                  <p>{group.primary.address}</p>
-                  <div className="history-meta">
-                    <span><b>{tr("送货日期", "Delivery date")}</b>{group.primary.planned_date || "—"}</span>
-                    <span><b>{tr("司机", "Driver")}</b>{group.primary.driver || "—"}</span>
-                    <span><b>{tr("下单人", "Created by")}</b>{group.primary.sales_rep}</span>
-                  </div>
-                  {group.primary.phone && <a href={`tel:${group.primary.phone}`}>{group.primary.phone}</a>}
-                  <div className="driver-note">
-                    <b>{tr("备注", "Note")}</b>
-                    <span>{group.primary.note || tr("无", "None")}</span>
-                  </div>
-                  <div className="product-lines">
-                    {group.orders.map((order) => <div className="product-line" key={order.id}><b>{order.sku}</b><strong>× {order.quantity}</strong></div>)}
-                  </div>
-                </article>
-              ))}</div>
+              <div className="history-sections">
+                {historyGroups.length > 0 && (
+                  <section>
+                    <h3 className="history-section-title">{tr("已完成送货", "Completed deliveries")}</h3>
+                    <div className="driver-grid history-grid">{historyGroups.map((group) => (
+                      <article className="driver-card history-card" key={group.key}>
+                        <div className="driver-date">
+                          <span>{tr("完成时间", "Completed")}</span>
+                          <strong>{group.primary.delivered_at ? formatDateTime(group.primary.delivered_at, lang) : "—"}</strong>
+                        </div>
+                        <div className="history-status">✓ {tr("已送达", "Delivered")}</div>
+                        <h3>{group.primary.customer}</h3>
+                        <p>{group.primary.address}</p>
+                        <div className="history-meta">
+                          <span><b>{tr("送货日期", "Delivery date")}</b>{group.primary.planned_date || "—"}</span>
+                          <span><b>{tr("司机", "Driver")}</b>{group.primary.driver || "—"}</span>
+                          <span><b>{tr("下单人", "Created by")}</b>{group.primary.sales_rep}</span>
+                        </div>
+                        {group.primary.phone && <a href={`tel:${group.primary.phone}`}>{group.primary.phone}</a>}
+                        <div className="driver-note">
+                          <b>{tr("备注", "Note")}</b>
+                          <span>{group.primary.note || tr("无", "None")}</span>
+                        </div>
+                        <div className="product-lines">
+                          {group.orders.map((order) => <div className="product-line" key={order.id}><b>{order.sku}</b><strong>× {order.quantity}</strong></div>)}
+                        </div>
+                      </article>
+                    ))}</div>
+                  </section>
+                )}
+                {filteredLossHistory.length > 0 && (
+                  <section>
+                    <h3 className="history-section-title">{tr("报损记录", "Damage records")}</h3>
+                    <div className="driver-grid history-grid">{filteredLossHistory.map((loss) => (
+                      <article className="driver-card history-card loss-history-card" key={loss.id}>
+                        <div className="driver-date loss-date">
+                          <span>{tr("报损时间", "Reported")}</span>
+                          <strong>{formatDateTime(loss.created_at, lang)}</strong>
+                        </div>
+                        <div className="history-status loss-status">− {tr("损耗", "Damaged")}</div>
+                        <h3>{loss.sku}</h3>
+                        <div className="loss-quantity">− {loss.quantity}</div>
+                        <div className="history-meta">
+                          <span><b>{tr("原因", "Reason")}</b>{loss.reason}</span>
+                          <span><b>{tr("操作人", "Reported by")}</b>{translateLog(loss.actor, lang)}</span>
+                        </div>
+                      </article>
+                    ))}</div>
+                  </section>
+                )}
+              </div>
             )}
           </>
         )}
@@ -884,6 +987,119 @@ export default function Home() {
           </>
         )}
       </section>
+
+      {consumptionSku && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setConsumptionSku(null)}>
+          <div
+            className="task-modal consumption-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="consumption-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="task-modal-header">
+              <div>
+                <h3 id="consumption-title">{consumptionSku}</h3>
+                <p>{tr("送达与损耗明细", "Delivery and damage history")}</p>
+              </div>
+              <button
+                type="button"
+                className="modal-close"
+                aria-label={tr("关闭", "Close")}
+                onClick={() => setConsumptionSku(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="consumption-summary-grid">
+              <div className="consumption-summary">
+                <span>{tr("累计送达", "Total consumption")}</span>
+                <strong>{skuHistoryEntries.filter((entry) => entry.kind === "delivered").reduce((total, entry) => total + entry.quantity, 0)}</strong>
+              </div>
+              <div className="consumption-summary loss-summary">
+                <span>{tr("累计损耗", "Total damaged")}</span>
+                <strong>{skuHistoryEntries.filter((entry) => entry.kind === "loss").reduce((total, entry) => total + entry.quantity, 0)}</strong>
+              </div>
+            </div>
+            {skuHistoryEntries.length === 0 ? (
+              <div className="consumption-empty">{tr("该物料暂无送达或损耗记录", "No delivery or damage records for this SKU")}</div>
+            ) : (
+              <div className="table-card consumption-table">
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>{tr("类型", "Type")}</th>
+                        <th>{tr("时间", "Time")}</th>
+                        <th>{tr("客户或原因", "Customer or reason")}</th>
+                        <th>{tr("详情", "Details")}</th>
+                        <th>{tr("数量", "Quantity")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {skuHistoryEntries.map((entry) => (
+                        <tr key={entry.key}>
+                          <td><span className={`history-type ${entry.kind === "loss" ? "loss-type" : "delivery-type"}`}>
+                            {entry.kind === "loss" ? tr("损耗", "Damaged") : tr("送达", "Delivered")}
+                          </span></td>
+                          <td className="log-time">{formatDateTime(entry.createdAt, lang)}</td>
+                          <td><b>{entry.title}</b></td>
+                          <td>{entry.detail || "—"}</td>
+                          <td className={`stock-number ${entry.kind === "loss" ? "loss-number" : "consumption-number"}`}>
+                            {entry.kind === "loss" ? "− " : ""}{entry.quantity}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {reportingLoss && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => !busy && setReportingLoss(null)}>
+          <form
+            className="task-modal loss-modal"
+            onSubmit={handleReportLoss}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="task-modal-header">
+              <div>
+                <h3>{tr("库存报损", "Report damage")}</h3>
+                <p>{tr("报损后会立即扣减可用库存，并永久保存记录。", "This immediately reduces available stock and saves a permanent record.")}</p>
+              </div>
+              <button
+                type="button"
+                className="modal-close"
+                aria-label={tr("关闭", "Close")}
+                disabled={busy}
+                onClick={() => setReportingLoss(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="loss-stock-summary">
+              <span><b>SKU</b>{reportingLoss.sku}</span>
+              <span><b>{tr("当前可用", "Available")}</b>{reportingLoss.available}</span>
+            </div>
+            <div className="task-form-grid">
+              <label>{tr("报损数量", "Damaged quantity")}
+                <input name="quantity" type="number" min="1" max={reportingLoss.available} step="1" defaultValue="1" required />
+              </label>
+              <label className="task-field-wide">{tr("报损原因", "Reason")}
+                <textarea name="reason" rows={3} placeholder={tr("例如：运输损坏、外观破损", "For example: transit damage or physical damage")} required />
+              </label>
+            </div>
+            <div className="modal-actions task-modal-actions">
+              <button type="button" className="secondary" disabled={busy} onClick={() => setReportingLoss(null)}>{tr("取消", "Cancel")}</button>
+              <button className="danger loss-submit" disabled={busy}>{tr("确认报损", "Confirm damage")}</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {editingInventory && (
         <div
@@ -1233,6 +1449,13 @@ function databaseTimestamp(value: string) {
   return new Date(`${value.replace(" ", "T")}Z`);
 }
 
+function isWithinDateRange(value: string, startDate: string, endDate: string) {
+  const timestamp = databaseTimestamp(value).getTime();
+  const start = startDate ? new Date(`${startDate}T00:00:00`).getTime() : Number.NEGATIVE_INFINITY;
+  const end = endDate ? new Date(`${endDate}T23:59:59.999`).getTime() : Number.POSITIVE_INFINITY;
+  return timestamp >= start && timestamp <= end;
+}
+
 function translateLog(value: string, lang: Language) {
   if (lang === "zh") return value;
   const translations: Record<string, string> = {
@@ -1248,6 +1471,7 @@ function translateLog(value: string, lang: Language) {
     "取消送货": "Delivery cancelled",
     "修改任务": "Task updated",
     "修改库存": "Inventory updated",
+    "库存报损": "Inventory damaged",
     "新货入库": "Stock received",
     "提交订购": "Stock ordered",
     "初始化库存": "Inventory initialised",
@@ -1271,6 +1495,7 @@ function logActionClass(action: string) {
     "取消送货": "log-deleted",
     "修改任务": "log-dispatch",
     "修改库存": "log-category",
+    "库存报损": "log-deleted",
     "更改类别": "log-category",
     "更改状态": "log-category",
     "删除订单": "log-deleted",
