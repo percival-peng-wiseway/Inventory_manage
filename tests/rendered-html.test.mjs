@@ -121,10 +121,13 @@ test("dispatch stores the driver email and sends the preset order email through 
   assert.match(route, /配送物料：/);
   assert.match(route, /系统链接：/);
   assert.match(route, /https:\/\/inventorymanage\.percival-0ae\.workers\.dev\//);
-  assert.match(page, /name="driver" defaultValue="陈师傅"/);
-  assert.match(page, /name="driverEmail" type="email" autoComplete="email" defaultValue="cyp81183456@gmail\.com"/);
-  assert.match(route, /body\.driver \|\| "陈师傅"/);
-  assert.match(route, /body\.driverEmail \|\| "cyp81183456@gmail\.com"/);
+  assert.match(page, /name="driver" placeholder=\{tr\("填写司机姓名", "Enter driver name"\)\} required/);
+  assert.match(page, /name="driverEmail" type="email" autoComplete="email" placeholder=\{tr\("填写司机邮箱", "Enter driver email"\)\} required/);
+  assert.match(route, /const driver = String\(body\.driver \|\| ""\)\.trim\(\)/);
+  assert.match(route, /const driverEmail = String\(body\.driverEmail \|\| ""\)\.trim\(\)/);
+  assert.match(route, /!address \|\| !plannedDate \|\| !driver \|\| !driverEmail/);
+  assert.doesNotMatch(page, /陈师傅|cyp81183456@gmail\.com/);
+  assert.doesNotMatch(route, /陈师傅|cyp81183456@gmail\.com/);
   assert.match(route, /return Response\.json\(\{ ok: true, emailSent, emailError \}\)/);
   assert.match(smtp, /from "cloudflare:sockets"/);
   assert.match(smtp, /port: SMTP_PORT/);
@@ -154,6 +157,18 @@ test("task cards show notes and every edit sends a correction email", async () =
   assert.match(editTaskBlock, /emailSent \? "邮件通知" : "邮件失败"/);
   assert.match(page, /const result = await mutate\(\{[\s\S]*?action: "editTask"/);
   assert.match(page, /修正邮件已发送给司机/);
+});
+
+test("dispatch cards display each order note", async () => {
+  const [page, css] = await Promise.all([
+    readFile(pageUrl, "utf8"),
+    readFile(cssUrl, "utf8"),
+  ]);
+
+  const dispatchBlock = page.match(/\{view === "dispatch"[\s\S]*?\{view === "arrival"/)?.[0] ?? "";
+  assert.match(dispatchBlock, /className="dispatch-note"/);
+  assert.match(dispatchBlock, /group\.primary\.note \|\| tr\("无", "None"\)/);
+  assert.match(css, /\.dispatch-note\s*\{/);
 });
 
 test("orders persist an estimated delivery time between 9 AM and 5 PM", async () => {

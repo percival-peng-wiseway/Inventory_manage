@@ -549,9 +549,9 @@ export async function POST(request: Request) {
     const firstOrder = orderRows.results[0];
     const address = String(body.address || "").trim();
     const plannedDate = String(body.plannedDate || "").trim();
-    const driver = String(body.driver || "陈师傅").trim();
-    const driverEmail = String(body.driverEmail || "cyp81183456@gmail.com").trim();
-    if (!address || !plannedDate || !driver) return error("请完整填写送货安排");
+    const driver = String(body.driver || "").trim();
+    const driverEmail = String(body.driverEmail || "").trim();
+    if (!address || !plannedDate || !driver || !driverEmail) return error("请完整填写送货安排");
     if (!isEmailAddress(driverEmail)) return error("请输入有效的司机邮箱");
     const itemText = orderRows.results.map((order) => `${order.sku} × ${order.quantity}`).join("，");
     await database.batch([

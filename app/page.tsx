@@ -733,13 +733,17 @@ export default function Home() {
                     <div className="order-items-summary">
                       {group.orders.map((order) => <p key={order.id}><b>{order.sku}</b><span>× {order.quantity}</span></p>)}
                     </div>
+                    <div className="dispatch-note">
+                      <b>{tr("备注", "Note")}</b>
+                      <span>{group.primary.note || tr("无", "None")}</span>
+                    </div>
                     <small>{group.primary.sales_rep} · {formatDate(group.primary.created_at, lang)}</small>
                   </div>
                   <form className="dispatch-form" onSubmit={(event) => handleSchedule(event, group)}>
                     <label>{tr("送货地址", "Address")}<input name="address" defaultValue={group.primary.address || ""} placeholder={tr("完整地址", "Full address")} required /></label>
                     <label>{tr("送货日期", "Delivery date")}<input name="plannedDate" type="date" required /></label>
-                    <label>{tr("司机", "Driver")}<input name="driver" defaultValue="陈师傅" required /></label>
-                    <label>{tr("司机邮箱", "Driver email")}<input name="driverEmail" type="email" autoComplete="email" defaultValue="cyp81183456@gmail.com" required /></label>
+                    <label>{tr("司机", "Driver")}<input name="driver" placeholder={tr("填写司机姓名", "Enter driver name")} required /></label>
+                    <label>{tr("司机邮箱", "Driver email")}<input name="driverEmail" type="email" autoComplete="email" placeholder={tr("填写司机邮箱", "Enter driver email")} required /></label>
                     <div className="dispatch-actions">
                       <button className="primary" disabled={busy}>{tr("安排并通知司机", "Schedule & notify driver")}</button>
                       <button type="button" className="danger" disabled={busy} onClick={() => cancelOrder(group)}>{tr("删除", "Delete")}</button>
@@ -1299,10 +1303,10 @@ export default function Home() {
                 </select>
               </label>
               <label>{tr("司机", "Driver")}
-                <input name="driver" defaultValue={editingTask.primary.driver || "陈师傅"} required />
+                <input name="driver" defaultValue={editingTask.primary.driver || ""} placeholder={tr("填写司机姓名", "Enter driver name")} required />
               </label>
               <label>{tr("司机邮箱", "Driver email")}
-                <input name="driverEmail" type="email" autoComplete="email" defaultValue={editingTask.primary.driver_email || "cyp81183456@gmail.com"} required />
+                <input name="driverEmail" type="email" autoComplete="email" defaultValue={editingTask.primary.driver_email || ""} placeholder={tr("填写司机邮箱", "Enter driver email")} required />
               </label>
               <label>{tr("销售", "Sales rep")}
                 <select name="salesRep" defaultValue={editingTask.primary.sales_rep} required>

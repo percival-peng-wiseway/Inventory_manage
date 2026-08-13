@@ -112,6 +112,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest-2); box-s
 .order-items-summary { margin: 12px 20px 15px 0; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
 .order-items-summary p { display: flex; justify-content: space-between; gap: 10px; margin: 0; padding: 8px 10px; border-bottom: 1px solid var(--line); background: #f7f8f4; }
 .order-items-summary p:last-child { border-bottom: 0; }
+.dispatch-note { display: grid; gap: 4px; margin: 0 20px 15px 0; padding: 10px 12px; border-left: 3px solid #d7a64d; border-radius: 7px; background: #fff6e3; color: #5d4a24; line-height: 1.45; }
+.dispatch-note b { font-size: 11px; }
+.dispatch-note span { overflow-wrap: anywhere; }
 .order-summary small { color: var(--muted); }
 .dispatch-form { display: grid; grid-template-columns: 1.2fr .75fr .65fr 1fr; gap: 14px; align-items: end; }
 .dispatch-actions { grid-column: 1 / -1; display: flex; gap: 9px; }
